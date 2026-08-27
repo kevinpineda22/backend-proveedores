@@ -54,6 +54,18 @@ export const esquemas = {
     correo: z.string().email("Ingrese un correo válido").max(255),
   }),
 
+  /** POST /api/admin/admins — alta o reactivación de un admin del portal */
+  agregarAdmin: z.object({
+    correo: z.string().trim().email("Ingrese un correo válido").max(255),
+  }),
+
+  /** PATCH /api/admin/admins/:userId — activar o desactivar. Nunca borrar. */
+  cambiarEstadoAdmin: z.object({
+    // Obligatorio y sin default: desactivar a alguien que aprueba precios no
+    // puede ser el efecto de omitir un campo. Se dice explícitamente.
+    activo: z.boolean({ required_error: "Indique si el administrador queda activo o inactivo" }),
+  }),
+
   /** GET /api/publico/sucursales?nit=… */
   sucursalesPorNit: z.object({
     nit: z.string().trim().min(5, "NIT inválido").max(15),

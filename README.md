@@ -14,6 +14,7 @@ Producción: **https://backend-proveedores.vercel.app**
 
 | Si querés… | Leé |
 |---|---|
+| **Entender cómo funciona, paso a paso** | [`docs/COMO-FUNCIONA.md`](docs/COMO-FUNCIONA.md) |
 | **Retomar el proyecto** | [`docs/ESTADO-Y-PENDIENTES.md`](docs/ESTADO-Y-PENDIENTES.md) |
 | Entender por qué está armado así | [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) |
 | Tocar algo que hable con SIESA | [`docs/CONTRATO-SIESA.md`](docs/CONTRATO-SIESA.md) |
@@ -27,7 +28,7 @@ El frontend vive en `Pagina-web_React/src/pages/PortalProveedores/`.
 
 ```bash
 npm install
-npm test      # 142 pruebas
+npm test      # 158 pruebas
 npm run dev   # localhost:3000
 ```
 
@@ -74,6 +75,9 @@ otra consulta, no un permiso faltante.
 | PATCH | `/api/admin/proveedores/:nit` | `pp_admins` |
 | POST | `/api/admin/cuentas/:id/invitar` | `pp_admins` |
 | POST | `/api/admin/solicitudes/:id/aprobar` · `/rechazar` | `pp_admins` |
+| GET | `/api/admin/admins` | `pp_admins` |
+| POST | `/api/admin/admins` | `pp_admins` |
+| PATCH | `/api/admin/admins/:userId` | `pp_admins` |
 | POST | `/api/cron/snapshot` | `CRON_SECRET` |
 
 ---

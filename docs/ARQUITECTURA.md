@@ -170,6 +170,9 @@ día se adopta, se adopta para todo el `src/`.
 | GET | `/api/admin/firmas/:id` | admin |
 | POST | `/api/admin/solicitudes/:id/aprobar` | admin |
 | POST | `/api/admin/solicitudes/:id/rechazar` | admin |
+| GET | `/api/admin/admins` | admin |
+| POST | `/api/admin/admins` | admin |
+| PATCH | `/api/admin/admins/:userId` | admin |
 | POST/GET | `/api/cron/snapshot` | `CRON_SECRET` |
 
 Verificado arrancando el server: `/api/salud` responde 200, el catálogo sin token

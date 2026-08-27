@@ -78,6 +78,13 @@ rAdmin.post("/cuentas/:id/invitar", validar(esquemas.invitar), async (req, res, 
     next(e);
   }
 });
+/* Administradores del portal. Antes esto se hacía con SQL a mano.
+   No hay DELETE a propósito: se desactiva, no se borra — `pp_auditoria`
+   apunta a estas filas. Ver el comentario del controlador. */
+rAdmin.get("/admins", admin.listarAdmins);
+rAdmin.post("/admins", validar(esquemas.agregarAdmin), admin.agregarAdmin);
+rAdmin.patch("/admins/:userId", validar(esquemas.cambiarEstadoAdmin), admin.cambiarEstadoAdmin);
+
 rAdmin.get("/solicitudes", admin.bandeja);
 rAdmin.get("/firmas/:id", admin.verFirma);
 rAdmin.post("/solicitudes/:id/aprobar", admin.aprobarSolicitud);

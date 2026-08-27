@@ -7,6 +7,7 @@ archivo primero. Los otros tres son de consulta:
 
 | Documento | Para qué |
 |---|---|
+| `COMO-FUNCIONA.md` | El recorrido completo paso a paso: login, circuito, piezas |
 | `ARQUITECTURA.md` | Por qué el sistema está armado así. Las decisiones y sus razones |
 | `CONTRATO-SIESA.md` | Qué se lee y qué se escribe en SIESA. Formatos y trampas |
 | `CONSULTA-COTIZACIONES.sql` | La consulta cargada en Connekta, comentada |
@@ -50,6 +51,8 @@ de producción el 2026-08-27.
 | Caso | Resultado |
 |---|---|
 | +4,93% | **201** creada y **marcada** — desde el 2026-08-27 el tope avisa, no frena |
+| Una marcada en la bandeja | va **primera**, la fila en ámbar, contador arriba |
+| Aprobar una marcada | el botón dice **"Aprobar pese al tope"** y pide **segundo clic** |
 | +0,50% | **201** creada |
 | Repetir el mismo ítem | **409** ya hay una pendiente |
 | Ítem de **otro proveedor** | **404** no está en su catálogo |
@@ -185,13 +188,35 @@ VITE_PROVEEDORES_API_URL=https://backend-proveedores.vercel.app/api
 
 Después del punto (c). Mientras esté, **nada se escribe en SIESA**.
 
-#### f) Pantalla para administrar admins del portal
+#### f) Pantalla para administrar admins del portal — ✅ RESUELTO
 
-`pp_admins` se maneja hoy con SQL a mano (`sql/003_admins.sql`). Funciona, pero
-para que compras agregue a alguien hace falta pasar por desarrollo.
+**Hecho el 2026-08-27**, backend y pantalla. Compras ya no necesita desarrollo
+para sumar o quitar a alguien. Tres endpoints, sin DELETE:
 
-Los endpoints no existen todavía. Serían tres: listar, agregar, desactivar.
-**Nunca borrar** — la auditoría de quién aprobó qué apunta a esas filas.
+| | Ruta | Qué hace |
+|---|---|---|
+| GET | `/api/admin/admins` | Lista activos e inactivos |
+| POST | `/api/admin/admins` | Alta o reactivación, **por correo** |
+| PATCH | `/api/admin/admins/:userId` | Activa o desactiva |
+
+Tres reglas que no se negocian, y están comentadas en el controlador:
+
+1. **Nunca se borra, solo se desactiva.** `pp_auditoria` apunta a estas filas.
+2. **Nunca cero admins activos.** `dejariaSinAdmins()` lo frena antes de escribir
+   — es función pura y tiene 7 tests. Sin esa guarda, el último admin puede
+   dejarse afuera y solo se sale con SQL contra producción.
+3. **El correo se resuelve contra `profiles`, no contra `auth.users`.** Un
+   proveedor también vive en `auth.users` con su email sintético: buscar ahí
+   permitiría darle permiso de aprobar precios a un proveedor.
+
+La pantalla es la tercera pestaña del panel de compras
+(`components/AdminsPortal.jsx`). Va última porque se toca una vez cada tanto.
+El botón de desactivar aparece deshabilitado cuando queda un solo admin activo:
+el backend lo rechaza igual, pero un botón que siempre falla es una trampa.
+
+Desactivarse a uno mismo **sí** se permite —puede ser justo lo que la persona
+quiere al irse— pero se avisa antes, porque el efecto es inmediato: el siguiente
+request de esa misma pantalla devuelve 403.
 
 ---
 
