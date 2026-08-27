@@ -23,6 +23,20 @@ const HORAS_VIGENCIA = Number(process.env.PROVEEDORES_INVITACION_HORAS) || 72;
 const URL_PORTAL = () =>
   process.env.PORTAL_PROVEEDORES_URL || "http://localhost:5173/portal-proveedores";
 
+/**
+ * ¿El enlace apunta a una máquina de desarrollo?
+ *
+ * Mientras el portal solo corre en local, `PORTAL_PROVEEDORES_URL` apunta a
+ * localhost — y está bien para probar. El problema es el día que alguien de
+ * compras invite a un proveedor REAL sin que nadie se acordó de cambiarla: el
+ * correo sale perfecto, el proveedor hace clic, y aterriza en su propia máquina.
+ *
+ * Nadie se entera hasta que el proveedor llama por teléfono. Por eso se detecta y
+ * se avisa, en vez de mandar un enlace muerto en silencio.
+ */
+export const enlaceEsLocal = (url = URL_PORTAL()) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:|\/|$)/i.test(String(url).trim());
+
 /** El token viaja UNA vez, en el correo. En la base solo vive su hash. */
 const hashear = (token) => crypto.createHash("sha256").update(token, "utf8").digest("hex");
 
@@ -102,6 +116,15 @@ export async function invitar({ cuentaId, correo, admin, ip }) {
 
   /* 4. El correo. */
   const enlace = `${URL_PORTAL()}/activar?token=${token}`;
+  const local = enlaceEsLocal();
+
+  if (local) {
+    console.warn(
+      `[invitacion] ⚠️  PORTAL_PROVEEDORES_URL apunta a localhost. El enlace enviado a ` +
+        `${correo} NO le va a funcionar. Configurá esa variable antes de invitar proveedores reales.`,
+    );
+  }
+
   const envio = await enviar({
     para: correo,
     asunto: "Acceso al Portal de Proveedores de Merkahorro",
@@ -129,6 +152,9 @@ export async function invitar({ cuentaId, correo, admin, ip }) {
     expiraAt,
     correoEnviado: envio.enviado,
     motivoCorreo: envio.motivo,
+    // El panel lo muestra como advertencia. Que quede solo en el log del servidor
+    // no sirve: quien invita está mirando la pantalla, no los logs de Vercel.
+    enlaceLocal: local,
     // En modo prueba se devuelve el enlace para poder seguir el flujo sin correo.
     // Fuera de modo prueba NUNCA sale de acá: sería un token en una respuesta HTTP.
     ...(modoPrueba() ? { enlacePrueba: enlace } : {}),
