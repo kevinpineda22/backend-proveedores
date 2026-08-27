@@ -147,7 +147,45 @@ cálculo.** Si algún día compras cambia de criterio, es la constante
 
 #### c) La primera aprobación real contra SIESA
 
-**Estado:** nunca se ejecutó. Todo se probó hasta el borde del POST.
+**Estado:** ✅ **verificada en SANDBOX el 2026-08-27**, contra el backend desplegado.
+Falta el POST de verdad — el sandbox corta justo antes de mandar.
+
+Solicitud #4 (FOUR LOKO SANDIA, ítem 177791, ICO de $5.131,73). Payload armado,
+tal como salió en el log de Vercel:
+
+```jsonc
+{
+  "Encabezado Cotizaciones": [{
+    "NIT_PROVEEDOR": "800186960",        // trimeado, sin relleno CHAR
+    "SUCURSAL": "006",                   // ceros a la izquierda conservados
+    "ITEM": "177791",
+    "FECHA_ACTIVACION": "20260920",      // AAAAMMDD, SIN tilde
+    "U.M": "UND",
+    "PRECIO": "000000000008197.0000",    // 20 caracteres exactos
+    "NOTAS": "Ajuste de lista septiembre"
+  }],
+  "Impuestos en Valor": [{
+    "FECHA_ACTIVACIÓN": "20260920",      // CON tilde — y la fecha NUEVA
+    "LLAVE_IMPUESTO": "ICO",
+    "VALOR_IMPUESTO": "000000000005131.7300"
+  }],
+  "Descuentos": []
+}
+```
+
+**Lo que esto confirma**, y era el riesgo más caro del proyecto: el ICO se
+**re-emite con la fecha nueva**. Es exactamente el caso del `FOUR LOKO PONCHE
+FRUTAS`, que en el histórico de SIESA perdió su ICO de $5.102 al crearse la
+cotización del 4-mar. Con este payload, no se pierde.
+
+También quedó verificada la trampa de la tilde: `FECHA_ACTIVACION` en el
+encabezado y `FECHA_ACTIVACIÓN` en los otros bloques. Escribirlas iguales haría
+que SIESA rechace el bloque.
+
+**Lo que falta:** sacar `PROVEEDORES_SANDBOX` y aprobar de verdad en QA.
+
+<details>
+<summary>Cómo se hizo (por si hay que repetirlo)</summary>
 
 `PROVEEDORES_SANDBOX=true` corta justo antes de mandar y deja el payload en el
 log. **La primera aprobación tiene que hacerse así**, mirando el payload:
@@ -160,6 +198,8 @@ log. **La primera aprobación tiene que hacerse así**, mirando el payload:
 Recién después se saca la variable y se aprueba de verdad **en QA**
 (`SIESA_COTIZACION_URL` ya apunta ahí). Pasar a producción es cambiar esa única
 variable.
+
+</details>
 
 ---
 
