@@ -4,19 +4,71 @@
 > escribe el código. Si el código y este documento no coinciden, uno de los dos
 > está mal — y hay que arreglarlo, no ignorarlo.
 
-Estado: **diseño aprobado, sin implementar.**
+Estado: **implementado y desplegado en producción** (2026-08-27).
 
 El contrato exacto con SIESA (consultas, conector, formatos, riesgos) vive en
 **[CONTRATO-SIESA.md](./CONTRATO-SIESA.md)**. Leerlo junto con este.
 
 Bloqueado por:
-- Consulta de **terceros** SIESA (falta) — bloquea maestro y login.
-- Prueba en QA del **riesgo de impuestos/descuentos huérfanos**
-  (CONTRATO-SIESA §3) — bloquea el servicio de empuje.
+- Consulta de **terceros** SIESA (falta) — el maestro se deriva provisionalmente
+  de las cotizaciones, así que un proveedor sin precios cargados no aparece.
+- **¿Descuentos en cascada o aditivos?** Sin confirmar con compras (§6).
+- La **primera aprobación real** contra SIESA, nunca ejecutada.
+
+Ya NO bloquea:
+- ~~Prueba en QA del riesgo de impuestos/descuentos huérfanos~~ — **confirmado
+  con datos de producción**, sin necesidad de QA: el propio histórico de SIESA
+  mostró un ICO de $5.102 que desapareció al cambiar de fecha. La re-emisión de
+  los tres bloques es obligatoria y está implementada. Ver CONTRATO-SIESA §3.
+
+### Desplegado en producción (2026-08-27)
+
+`https://backend-proveedores.vercel.app` — verificado de punta a punta:
+
+| Chequeo | Resultado |
+|---|---|
+| `/api/salud` | 200 |
+| `/api/publico/sucursales?nit=800186960` | 200 — devuelve la sucursal 006 |
+| `/api/proveedor/catalogo` sin token | 401 |
+| `/api/cron/snapshot` sin secreto | 401 |
+| CORS desde `localhost:5173` y `merkahorro.com` | permitido |
+| CORS desde otro origen | **sin** `Access-Control-Allow-Origin` |
+| Snapshot completo | **27 s**, 18.866 cotizaciones, 337 proveedores |
+
+Los 27 segundos importan: `vercel.json` da 300 de `maxDuration`, así que el cron
+de las 10:00 UTC (5:00 Colombia) tiene margen de sobra aun si SIESA se pone lenta.
+
+#### Variables en Vercel
+
+```
+SUPABASE_URL · SUPABASE_SERVICE_KEY · CONNI_KEY · CONNI_TOKEN · CRON_SECRET
+SIESA_CONSULTA_COTIZACIONES=merkahorro_cotizaciones_dev_2
+CORS_ORIGENES=https://merkahorro.com,http://localhost:5173
+PORTAL_PROVEEDORES_URL=http://localhost:5173/portal-proveedores   ← provisional
+PROVEEDORES_SANDBOX=true                                          ← provisional
+```
+
+**`PORTAL_PROVEEDORES_URL` apunta a localhost a propósito**: el frontend todavía
+no está desplegado, así que ese ES el lugar donde vive el portal hoy. El día que
+suba, se cambia.
+
+Mientras tanto, `enlaceEsLocal()` lo detecta y el panel avisa al invitar: *"la
+cuenta quedó invitada, pero el enlace apunta a una dirección local y NO le va a
+funcionar al proveedor"*. Sin ese aviso, compras invitaría a un proveedor real, el
+correo saldría perfecto, y nadie se enteraría hasta que el proveedor llame.
+
+#### CSP: no hubo que tocarlo
+
+`public/.htaccess` tiene hoy `connect-src *`, y la versión endurecida que está
+preparada para la Fase 3 ya incluye `https://*.vercel.app` — el dominio nuevo
+entra por ese comodín. Checklist de `CSP_MIGRATION_GUIDE.md` §5 cumplido sin
+cambios.
+
+---
 
 ### Estado de implementación
 
-Actualizado 2026-08-27. `npm test` → **117 pruebas, 117 pasan.**
+Actualizado 2026-08-27. `npm test` → **142 pruebas, 142 pasan.**
 
 Migraciones: `001` ✅ · `002` ✅ — las dos ejecutadas.
 
@@ -48,13 +100,12 @@ portal está poblado.
 | `vercel.json` | ✅ | Cron del snapshot, 10:00 UTC = 5:00 Colombia |
 | `services/solicitud.service.js` | ✅ | Crear / aprobar / rechazar + empuje idempotente |
 | `services/maestro.service.js` | ✅ 7 tests | `pp_proveedores` + `pp_cuentas` — **fuente provisional** |
-| `services/invitacion.service.js` | ✅ | Token de un solo uso, 72 h (§3.4) |
+| `services/invitacion.service.js` | ✅ 5 tests | Token de un solo uso, 72 h. Los tests cubren el aviso de enlace local (§3.4) |
 | `services/email.service.js` | ✅ | SMTP con modo prueba |
 | `services/emailSintetico.js` | ✅ 10 tests | Gemelo del front |
 | `middleware/validators.js` | ✅ | Zod en todo lo que entra |
 | `middleware/rateLimit.js` | ✅ | Lomo de burro del endpoint público |
-| `controllers/` `routes/` `server.js` | ✅ **arranca** | API completa salvo invitaciones |
-| `services/invitacion.service.js` | ⬜ | Token de un solo uso (§3.4) |
+| `controllers/` `routes/` `server.js` | ✅ **en producción** | API completa. Falta solo el ABM de `pp_admins` |
 | Front `utils/emailSintetico.js` | ✅ 10 tests | Gemelo del backend |
 | Front `utils/costoNeto.js` | ✅ 16 tests | Vista previa del tope |
 | Front `LoginProveedor.jsx` | ✅ probado | NIT → sucursal → contraseña |
@@ -63,7 +114,7 @@ portal está poblado.
 | Front `utils/fechas.js` | ✅ 6 tests | `hoyEnColombia`, formato sin `Date` |
 | Front `ProveedorPanel.jsx` | ✅ probado | Catálogo, solicitudes, cierre de sesión |
 | Front `EditarPrecioModal.jsx` | ✅ probado | Propuesta + costo neto en vivo + firma |
-| Front bandeja de aprobaciones | ⬜ | Lo último que falta |
+| Front `BandejaAprobaciones.jsx` | ✅ | Aprobar / rechazar, montada en `AdminPanel.jsx` |
 
 ### Rutas del frontend
 
@@ -455,13 +506,18 @@ escenarios de arriba con los números de Altipal).
 > **⚠️ SIN CONFIRMAR CON COMPRAS, y ya no es teórico:** si los descuentos por
 > orden se componen en **cascada** o se **suman**. Se asume cascada (`MODO_DESCUENTO`).
 >
-> La primera corrida real mostró **96 renglones con DOS descuentos** —órdenes 1 y
-> 2— sobre 4.888. En esos 96, los dos modos dan números distintos, y el número es
-> el que decide si una propuesta pasa el tope. Hay que preguntarlo antes de
-> producción.
+> El snapshot COMPLETO (18.866 cotizaciones) mostró **76 renglones con dos o tres
+> descuentos**: 53 con dos y 23 con tres. En esos 76, los dos modos dan números
+> distintos, y el número es el que decide si una propuesta pasa el tope. Hay que
+> preguntarlo antes de producción.
 >
-> (Órdenes observados: solo 1 y 2. El validador acepta hasta 3, que es lo que la
-> consulta sabe leer.)
+> (Órdenes observados: 1, 2 y **3** — 11.321 / 233 / 53 filas. No hay orden 4,
+> verificado el 2026-08-27. El validador acepta hasta 3, que es lo que la consulta
+> sabe leer.)
+>
+> Cambiar de modo es UNA constante: `MODO_DESCUENTO` en `services/costoNeto.js`.
+> La rama `aditivo` ya está escrita y probada. **Y su gemelo del frontend**
+> (`utils/costoNeto.js`), o divergen.
 
 Reglas:
 
