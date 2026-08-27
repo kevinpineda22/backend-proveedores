@@ -36,13 +36,27 @@ const armar = (extra = {}) =>
 
 /* ── Forma del payload ───────────────────────────────────────────────────── */
 
-test("manda los tres bloques con los nombres exactos del conector", () => {
-  const p = armar();
+test("los nombres de los bloques son exactos", () => {
+  const p = armar({
+    vigente: vigenteDe([{ ...ATUN_ALAMAR, IdLlaveImpto: "ICO", ValorImpto: 1200 }]),
+  });
   assert.deepEqual(Object.keys(p), [
     "Encabezado Cotizaciones",
     "Impuestos en Valor",
     "Descuentos",
   ]);
+});
+
+test("una sección VACÍA se omite, no se manda en cero", () => {
+  // Verificado contra QA el 2026-08-27: mandar `"Descuentos": []` devuelve
+  // HTTP 400 con una advertencia por CADA variable declarada en el conector —
+  // "el campo 'ITEM' no se está enviando en la sección 'Descuentos'". El
+  // conector recorre las variables configuradas y no encuentra ninguna.
+  const p = armar({ propuesta: { ...PROPUESTA, descuentos: [] } });
+  assert.equal("Descuentos" in p, false);
+  assert.equal("Impuestos en Valor" in p, false);
+  // El encabezado va SIEMPRE: sin él no hay nada que importar.
+  assert.equal(p["Encabezado Cotizaciones"].length, 1);
 });
 
 test("el encabezado lleva la llave formateada y el precio nuevo", () => {
@@ -96,9 +110,9 @@ test("RE-EMITE los impuestos vigentes con la FECHA NUEVA", () => {
   assert.equal(impuestos[1].LLAVE_IMPUESTO, "IBUA");
 });
 
-test("sin impuestos vigentes, el bloque va vacío pero presente", () => {
+test("sin impuestos vigentes, el bloque NO viaja", () => {
   const p = armar();
-  assert.deepEqual(p[BLOQUES.impuestos], []);
+  assert.equal(BLOQUES.impuestos in p, false);
 });
 
 /* ── Descuentos ──────────────────────────────────────────────────────────── */
@@ -114,7 +128,7 @@ test("un descuento quitado se representa por AUSENCIA, no por una fila en 0%", (
   // El proveedor borra el 3%. Como la fecha es parte de la llave, no mandar el
   // orden significa que ese orden no existe en la fecha nueva.
   const p = armar({ propuesta: { ...PROPUESTA, descuentos: [{ orden: 1, porcentaje: 0 }] } });
-  assert.deepEqual(p[BLOQUES.descuentos], []);
+  assert.equal(BLOQUES.descuentos in p, false);
 });
 
 test("emite un renglón por orden, ordenados", () => {

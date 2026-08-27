@@ -260,6 +260,45 @@ request de esa misma pantalla devuelve 403.
 
 ---
 
+### 3.2 bis — LO QUE ENSEÑÓ EL PRIMER RECHAZO REAL (2026-08-27)
+
+El primer POST de verdad a SIESA falló, y destapó **tres** problemas. Vale
+leerlos juntos, porque el tercero es el que hace difícil encontrar los otros dos.
+
+#### 1. Una sección vacía se rechaza (SIESA)
+
+`"Descuentos": []` devuelve **HTTP 400**: el conector recorre las variables que
+tiene declaradas para esa sección y no encuentra ninguna. Ahora el encabezado va
+siempre y los otros dos bloques **solo si tienen filas**. Ver CONTRATO-SIESA §5bis.
+
+#### 2. El error se enmascaraba justo cuando más se necesitaba (nuestro)
+
+`errorHandler` ocultaba **todos** los 5xx para no filtrar internals — una regla
+correcta por defecto. Pero el rechazo de SIESA sale como **502**, así que el admin
+veía *"Error interno del servidor"* en lugar del mensaje del ERP, que es lo único
+que dice qué corregir.
+
+Se agregó `createErrorExpuesto()`: un 5xx cuyo mensaje **sí** llega al usuario,
+para los casos en que el texto lo escribimos nosotros y no contiene nada de
+adentro. El log sigue recibiendo el error completo siempre.
+
+> **La regla:** enmascarar por defecto, exponer a propósito. Un error que solo
+> vive en los logs de Vercel obliga a abrir el panel de un proveedor de servicios
+> para operar el sistema — y eso, en la práctica, es no tener manejo de errores.
+
+#### 3. Y aunque no se enmascarara, tampoco se veía (nuestro)
+
+El aviso de error se pintaba en la **lista**, con el modal de detalle **abierto
+encima**. Nunca llegaba al ojo. Ahora el error de aprobar y rechazar se muestra
+**dentro del modal**, con la respuesta cruda del ERP en un `<details>`
+desplegable.
+
+> Un mensaje de error que la pantalla no muestra es exactamente igual a no
+> tenerlo. Al escribir feedback, la pregunta no es "¿lo estoy seteando?" sino
+> "¿dónde va a quedar parado el usuario cuando esto pase?".
+
+---
+
 ### 3.3 DEUDA CONOCIDA — no bloquea, pero conviene saberla
 
 #### g) El sistema de rutas de la app

@@ -176,11 +176,17 @@ export function armarPayload({ vigente, propuesta, permitirRetroactiva = false, 
       VALOR_DESCUENTO: campo.valorDescuento(0),
     }));
 
-  return {
-    [BLOQUES.encabezado]: [encabezado],
-    [BLOQUES.impuestos]: impuestos,
-    [BLOQUES.descuentos]: descuentos,
-  };
+  /* UNA SECCIÓN VACÍA SE OMITE, NO SE MANDA EN CERO.
+     Verificado contra QA el 2026-08-27: mandar `"Descuentos": []` devuelve
+     HTTP 400 con una advertencia por CADA variable declarada en el conector:
+       "El campo opcional 'ITEM' no se está enviando en la sección 'Descuentos',
+        pero se encuentra configurado como variable dentro del conector."
+     El conector recorre las variables que tiene configuradas para la sección y
+     no encuentra ninguna. Sin la sección, no la recorre. */
+  const payload = { [BLOQUES.encabezado]: [encabezado] };
+  if (impuestos.length) payload[BLOQUES.impuestos] = impuestos;
+  if (descuentos.length) payload[BLOQUES.descuentos] = descuentos;
+  return payload;
 }
 
 /* ── Lectura de la respuesta ─────────────────────────────────────────────── */

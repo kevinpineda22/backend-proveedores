@@ -466,9 +466,24 @@ Implementado en `services/siesaCotizacion.js` (`armarPayload`).
 | Impuestos | **Re-emitidos tal cual de la vigente**, con la fecha nueva |
 | Descuentos | De la **propuesta** — el proveedor sí los edita |
 
-Los tres bloques van siempre presentes, aunque queden vacíos: es la forma
-documentada del conector. Si QA rechaza un array vacío, se filtra en `armarPayload`
-y en ningún otro lado.
+### ⚠️ UNA SECCIÓN VACÍA SE OMITE — no se manda en cero
+
+Verificado contra QA el **2026-08-27**, con un rechazo real. Se mandó
+`"Descuentos": []` en un ítem sin descuentos y el conector devolvió **HTTP 400**
+con una advertencia por CADA variable que tiene configurada para esa sección:
+
+```
+"Advertencia: El campo opcional 'ITEM' no se está enviando en la sección
+ 'Descuentos', pero se encuentra configurado como variable dentro del conector."
+```
+
+Lo mismo para `%_DESCUENTO` y `VALOR_DESCUENTO`.
+
+**Por qué pasa:** el conector recorre las variables que tiene declaradas para la
+sección y no encuentra ninguna. Si la sección **no viene**, no la recorre.
+
+**La regla:** el encabezado va siempre; impuestos y descuentos **solo si tienen
+filas**. Está en `armarPayload()` y tiene test.
 
 ### Por qué los impuestos no los edita el proveedor
 

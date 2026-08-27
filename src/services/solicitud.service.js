@@ -6,7 +6,7 @@
    ============================================================================= */
 
 import { supabase } from "../config/supabase.js";
-import { createError } from "../middleware/errorHandler.js";
+import { createError, createErrorExpuesto } from "../middleware/errorHandler.js";
 import { costoNeto, evaluarPropuesta } from "./costoNeto.js";
 import { hoyEnColombia, porcentajesDescuento, separarVigentes } from "./normalizarCotizacion.js";
 import { registrarFirma, verificarFirmaDeSolicitud } from "./firma.service.js";
@@ -309,7 +309,15 @@ export async function aprobar({ solicitudId, admin, ip }) {
       ip,
     });
 
-    throw createError(502, `SIESA rechazó el cambio: ${e.message}`);
+    // EXPUESTO a propósito: el mensaje del ERP es lo único que le dice al admin
+    // qué corregir. Enmascararlo como "Error interno del servidor" —que es lo que
+    // pasaba— convierte un rechazo accionable en un misterio, y obliga a ir a
+    // buscar los logs de Vercel para operar el sistema.
+    throw createErrorExpuesto(
+      502,
+      `SIESA rechazó el cambio: ${e.message}`,
+      e.siesaData ?? null,
+    );
   }
 }
 
