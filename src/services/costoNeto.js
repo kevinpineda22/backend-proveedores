@@ -36,9 +36,12 @@
  * `aditivo`: los porcentajes se suman y se aplican una vez.
  *   4.672 con 3% y 2% → 4.672 × 0,95 = 4.438,40
  *
- * ✅ CONFIRMADO POR COMPRAS (2026-08-27): es CASCADA. Se preguntó con el ejemplo
- * de arriba —$4.672 con 3% y 2%— y la respuesta fue $4.441,20, o sea el segundo
- * descuento aplicado sobre el saldo del primero.
+ * ✅ CONFIRMADO (2026-08-27): es CASCADA. No por la palabra de nadie — por una
+ * captura de la pantalla de ítems de SIESA, donde el ERP hace la cuenta solo:
+ * JABON PROTEX, precio 9.524,15 × 5, con órdenes de 4% y 25%. El descuento de
+ * orden 2 sale $11.429, que es el 25% del SALDO (45.715,92) y no del bruto
+ * (daría 11.905,19). La cadena cierra hasta el último peso hasta el neto.
+ * Fijado como test.
  *
  * Coincide con lo que ya se asumía, así que no hubo que cambiar el cálculo. Pero
  * la confirmación importa igual: se buscaron por fuerza bruta las combinaciones

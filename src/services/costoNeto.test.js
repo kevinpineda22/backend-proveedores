@@ -205,3 +205,30 @@ test("excedeTope: coincide con lo que evaluarPropuesta ya decidió", () => {
   assert.equal(r.variacionPct, 5);
   assert.equal(r.excede, false);
 });
+
+/* ── La prueba dura de que es CASCADA ─────────────────────────────────────────
+   Captura de la pantalla de items de SIESA (2026-08-27). No es la palabra de
+   nadie: es el ERP mostrando su propia cuenta, y el orden 2 es justo donde los
+   dos modos se separan.
+
+     JABON PROTEX BARRA OMEGA 3 X 110 GR · P3-EMPAQUE X 3
+     Precio unitario  $9.524,15      Cant. 5      Valor bruto  $47.621
+     Orden 1   4%   →  descuento  $1.905
+     Orden 2  25%   →  descuento  $11.429     ← acá se decide
+     Dscto lineal $13.334 · Subtotal $34.287 · IVA 19% $6.515 · Neto $40.802
+
+   25% sobre el SALDO (45.715,92) = 11.428,98 ✓ coincide con SIESA
+   25% sobre el BRUTO (47.620,75) = 11.905,19 ✗ no coincide
+   ────────────────────────────────────────────────────────────────────────── */
+
+test("cascada confirmada contra SIESA: JABON PROTEX con 4% y 25%", () => {
+  // 9524.15 × 0,96 × 0,75 = 6857,388 por unidad.
+  assert.equal(costoNeto(9524.15, [4, 25]), 6857.388);
+
+  // Por las 5 unidades da el subtotal exacto que muestra SIESA.
+  assert.equal(Math.round(6857.388 * 5), 34287);
+
+  // Y el modo aditivo NO llega a ese número: 9524.15 × 0,71 × 5 = 33.810,73.
+  // Se deja escrito para que se vea la distancia — son 476 pesos en UN renglón.
+  assert.notEqual(Math.round(9524.15 * 0.71 * 5), 34287);
+});

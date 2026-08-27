@@ -94,7 +94,34 @@ aparece en el maestro, y a ese no se le puede asociar un correo.
 
 #### b) ¿Los descuentos son en CASCADA o ADITIVOS? — ✅ RESUELTO
 
-**Estado:** **CASCADA**, confirmado por compras el 2026-08-27.
+**Estado:** **CASCADA**, confirmado el 2026-08-27 — y no de palabra: **con una
+captura de SIESA** que muestra la cuenta hecha por el propio ERP.
+
+**La prueba, desde la pantalla de ítems de SIESA (2026-08-27):**
+
+```
+JABON PROTEX BARRA OMEGA 3 X 110 GR · P3-EMPAQUE X 3
+Precio unitario $9.524,15 · Cantidad 5 · Valor bruto $47.621
+
+  Orden 1   4%  →  descuento  $1.905
+  Orden 2  25%  →  descuento  $11.429      ← acá se decide
+
+Dscto lineal $13.334 · Subtotal $34.287 · IVA 19% $6.515 · Neto $40.802
+```
+
+El orden 2 es justo donde los dos modos se separan:
+
+| Modo | 25% aplicado sobre | Da | ¿Coincide con SIESA? |
+|---|---|---|---|
+| **Cascada** | el saldo tras el 4% — 45.715,92 | **11.428,98** | ✅ |
+| Aditivo | el bruto — 47.620,75 | 11.905,19 | ❌ |
+
+La cadena cierra hasta el último peso, y `costoNeto(9524.15, [4, 25])` da
+6.857,388 × 5 = **34.286,94**, el subtotal exacto. En aditivo daría 33.810,73:
+**476 pesos de diferencia en UN solo renglón.**
+
+Está fijado como test en `costoNeto.test.js` con estos mismos números, así que
+si alguien cambia `MODO_DESCUENTO` sin querer, la prueba lo agarra.
 
 ```
 cascada:  4.672 × 0,97 × 0,98 = 4.441,20

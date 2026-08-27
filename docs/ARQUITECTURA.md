@@ -518,9 +518,9 @@ variacion  = (costo_neto_propuesto − costo_neto_actual) / costo_neto_actual
 Implementado y probado en `src/services/costoNeto.js` (16 tests, incluidos los dos
 escenarios de arriba con los números de Altipal).
 
-> **✅ CONFIRMADO POR COMPRAS (2026-08-27): es CASCADA.** Se preguntó con el
-> ejemplo de $4.672 con 3% y 2%, y la respuesta fue $4.441,20 — el segundo
-> descuento sobre el saldo del primero. `MODO_DESCUENTO = "cascada"` queda firme.
+> **✅ CONFIRMADO: es CASCADA.** Y no por la palabra de nadie — por una captura
+> de la pantalla de ítems de SIESA (2026-08-27), donde el ERP muestra su propia
+> cuenta. `MODO_DESCUENTO = "cascada"` queda firme. Ver ESTADO §3.1.b.
 >
 > El snapshot COMPLETO (18.866 cotizaciones) mostró **76 renglones con dos o tres
 > descuentos**: 53 con dos y 23 con tres. En esos 76, los dos modos dan números
