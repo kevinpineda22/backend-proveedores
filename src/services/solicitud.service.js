@@ -321,6 +321,82 @@ export async function aprobar({ solicitudId, admin, ip }) {
   }
 }
 
+/**
+ * Devuelve una solicitud FALLIDA a la cola, para poder volver a intentarla.
+ *
+ * POR QUÉ EXISTE
+ *
+ * `fallida` se diseñó para "SIESA rechazó, que lo mire una persona" — y eso está
+ * bien. Lo que faltaba era la salida: sin esto, una solicitud que falló por una
+ * causa ARREGLABLE (un bug nuestro en el payload, un maestro que faltaba en el
+ * ERP, un corte de red) quedaba muerta para siempre, y el proveedor tenía que
+ * volver a proponer y firmar todo de nuevo.
+ *
+ * La regla no era "nunca reintentar": era **nunca reintentar SOLO**. La
+ * diferencia es quién decide.
+ *
+ * POR QUÉ NO RE-EMPUJA DIRECTO
+ *
+ * Devuelve la solicitud a `pendiente` y limpia el ancla de idempotencia; el
+ * empuje vuelve a pasar por `aprobar()`, con todas sus guardas: verificación de
+ * firma y candado atómico. Un "reintentar" que empujara por su cuenta sería un
+ * segundo camino hacia SIESA, y dos caminos se desincronizan.
+ *
+ * EL RIESGO QUE HAY QUE MIRAR ANTES
+ *
+ * Un fallo puede ser "SIESA rechazó" (no entró nada) o "se cortó la respuesta"
+ * (pudo haber entrado). En el segundo caso, reintentar duplica el precio. Por eso
+ * esto es una decisión humana explícita y queda registrada con nombre.
+ */
+export async function reintentar({ solicitudId, admin, ip }) {
+  const { data: solicitud, error } = await supabase
+    .from("pp_solicitudes_precio")
+    .select("id, estado, siesa_respuesta")
+    .eq("id", solicitudId)
+    .maybeSingle();
+
+  if (error) throw new Error(`No se pudo leer la solicitud: ${error.message}`);
+  if (!solicitud) throw createError(404, "La solicitud no existe");
+  if (solicitud.estado !== "fallida") {
+    throw createError(409, `Solo se puede reintentar una solicitud con problema. Esta está en "${solicitud.estado}".`);
+  }
+
+  const { data: vuelta, error: errUpd } = await supabase
+    .from("pp_solicitudes_precio")
+    .update({
+      estado: "pendiente",
+      // Se limpia el ancla para que `aprobar()` pueda volver a tomarla. Es
+      // justamente el candado que impide el doble empuje, así que soltarlo es la
+      // parte deliberada de esta operación — y por eso solo la hace un humano.
+      siesa_aplicado_at: null,
+      resuelto_at: null,
+      resuelto_por: null,
+    })
+    .eq("id", solicitudId)
+    .eq("estado", "fallida")
+    .select("id")
+    .maybeSingle();
+
+  if (errUpd) throw new Error(`No se pudo reintentar: ${errUpd.message}`);
+  if (!vuelta) throw createError(409, "La solicitud ya fue modificada por otra persona.");
+
+  await auditar({
+    entidad: "pp_solicitudes_precio",
+    entidadId: solicitudId,
+    accion: "reintentar",
+    estadoAnterior: "fallida",
+    estadoNuevo: "pendiente",
+    actorUserId: admin.userId,
+    actorRol: "pp_admin",
+    // Se guarda el fallo anterior: si alguien reintenta tres veces la misma cosa,
+    // la auditoría tiene que poder mostrar contra qué se estrelló cada vez.
+    detalle: { falloAnterior: solicitud.siesa_respuesta ?? null },
+    ip,
+  });
+
+  return { id: solicitudId, estado: "pendiente" };
+}
+
 /** Rechaza una solicitud. El motivo es obligatorio — lo exige también la base. */
 export async function rechazar({ solicitudId, motivo, admin, ip }) {
   const { data, error } = await supabase

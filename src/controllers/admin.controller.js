@@ -1,6 +1,6 @@
 import { supabase } from "../config/supabase.js";
 import { createError } from "../middleware/errorHandler.js";
-import { aprobar, rechazar } from "../services/solicitud.service.js";
+import { aprobar, rechazar, reintentar } from "../services/solicitud.service.js";
 import { excedeTope } from "../services/costoNeto.js";
 
 /** Maestro de proveedores: NIT, sucursales, correo asociado, tope. */
@@ -326,6 +326,15 @@ export async function cambiarEstadoAdmin(req, res, next) {
     });
 
     res.json({ ok: true, userId, activo, nombre: fila.nombre });
+  } catch (e) {
+    next(e);
+  }
+}
+
+/** Devuelve una solicitud con problema a la cola de pendientes. */
+export async function reintentarSolicitud(req, res, next) {
+  try {
+    res.json(await reintentar({ solicitudId: req.params.id, admin: req.admin, ip: req.ip }));
   } catch (e) {
     next(e);
   }

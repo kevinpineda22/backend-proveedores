@@ -286,7 +286,32 @@ adentro. El log sigue recibiendo el error completo siempre.
 > vive en los logs de Vercel obliga a abrir el panel de un proveedor de servicios
 > para operar el sistema — y eso, en la práctica, es no tener manejo de errores.
 
-#### 3. Y aunque no se enmascarara, tampoco se veía (nuestro)
+#### 3. `fallida` era un callejón sin salida (nuestro)
+
+Al fallar el empuje, la solicitud pasa a `fallida` — correcto — pero **no había
+ninguna acción disponible desde ahí**. Una solicitud que falló por una causa
+ARREGLABLE quedaba muerta, y el proveedor tenía que volver a proponer y firmar
+todo de nuevo.
+
+La regla que se había escrito era *"nunca reintento ciego"*. Se implementó como
+*"nunca reintento"*, que no es lo mismo: **la diferencia es quién decide.**
+
+Se agregó `POST /admin/solicitudes/:id/reintentar` — botón **"Devolver a
+pendientes"** en el detalle. Devuelve la solicitud a la cola y limpia el ancla de
+idempotencia; el empuje vuelve a pasar por `aprobar()`, con verificación de firma
+y candado atómico. **No re-empuja por su cuenta**: un segundo camino hacia SIESA
+sería un segundo camino que mantener sincronizado.
+
+La pantalla avisa lo que hay que mirar ANTES:
+
+> Un fallo puede ser "SIESA rechazó" (no entró nada) o "se cortó la respuesta"
+> (pudo haber entrado). En el segundo caso, reintentar carga el precio dos veces.
+
+Por eso es una decisión humana explícita, y queda en `pp_auditoria` con el fallo
+anterior adjunto: si alguien reintenta tres veces lo mismo, el registro muestra
+contra qué se estrelló cada vez.
+
+#### 4. Y aunque no se enmascarara, tampoco se veía (nuestro)
 
 El aviso de error se pintaba en la **lista**, con el modal de detalle **abierto
 encima**. Nunca llegaba al ojo. Ahora el error de aprobar y rechazar se muestra

@@ -89,6 +89,7 @@ rAdmin.get("/solicitudes", admin.bandeja);
 rAdmin.get("/firmas/:id", admin.verFirma);
 rAdmin.post("/solicitudes/:id/aprobar", admin.aprobarSolicitud);
 rAdmin.post("/solicitudes/:id/rechazar", validar(esquemas.rechazar), admin.rechazarSolicitud);
+rAdmin.post("/solicitudes/:id/reintentar", admin.reintentarSolicitud);
 router.use("/admin", rAdmin);
 
 /* ── CRON ─────────────────────────────────────────────────────────────────
