@@ -277,10 +277,18 @@ export async function importarCotizacion({ solicitudId, ...args }) {
   // armado, que es donde viven los bugs de formato, llave y re-emisión, se
   // ejercita igual contra datos reales y queda guardado para revisarlo.
   if (sandboxOn()) {
+    // El payload ENTERO, no solo los conteos.
+    //
+    // El sandbox existe para PODER MIRAR lo que se iba a mandar antes de
+    // mandarlo. Un log que dice "1 encabezado, 0 impuestos" cuenta cajas sin
+    // mostrar qué hay adentro — y lo que se revisa es justamente el adentro: si
+    // la fecha quedó en AAAAMMDD, si el precio tiene sus 20 caracteres, si los
+    // impuestos se re-emitieron. Sin esto hay que ir a buscarlo a la base.
     console.warn(
       `[siesa] 🧪 SANDBOX — solicitud ${solicitudId ?? "?"} NO se importó. ` +
-        `Payload armado: 1 encabezado, ${payload[BLOQUES.impuestos].length} impuesto(s), ` +
-        `${payload[BLOQUES.descuentos].length} descuento(s).`,
+        `${payload[BLOQUES.impuestos].length} impuesto(s), ` +
+        `${payload[BLOQUES.descuentos].length} descuento(s). Payload:\n` +
+        JSON.stringify(payload, null, 2),
     );
     return { ok: true, sandbox: true, payload, respuesta: { sandbox: true } };
   }
