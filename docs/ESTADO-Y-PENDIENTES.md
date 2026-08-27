@@ -330,4 +330,15 @@ Si algo de esto se "simplifica", el sistema sigue compilando y empieza a cobrar 
    Hoy: `precio_actual` quedó congelado y el admin ve el comparativo. Falta
    decidir si eso amerita una advertencia más fuerte o un rechazo automático.
 4. **¿Hay más llaves de impuesto además de ICO e IBU3?** Son las dos que aparecen
-   en los datos. La documentación del conector decía "IBUA", que no existe.
+   en los datos de la consulta de cotizaciones. La documentación del conector
+   decía "IBUA", que no existe.
+
+   **Pista nueva (2026-08-27):** la captura de la pantalla de ítems de SIESA
+   muestra `IV03 — IVA 19% BIENES`. Ojo: esa es una pantalla de **entrada por
+   compra**, no la consulta de cotizaciones, así que no prueba que `IV03` aparezca
+   en `IdLlaveImpto`. Vale confirmarlo antes de la primera aprobación real: si
+   apareciera y no se re-emitiera, sería el mismo agujero del ICO pero con IVA.
+
+   **No es urgente para el código:** `agruparCotizaciones()` NO tiene lista
+   blanca de llaves — acumula las que vengan, así que una llave nueva pasa sola.
+   Se escribió tolerante justamente por esto.
