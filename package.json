@@ -1,0 +1,22 @@
+{
+  "name": "backend-proveedores",
+  "version": "0.1.0",
+  "description": "API REST del Portal de Proveedores — Merkahorro",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test \"src/**/*.test.js\""
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
+    "axios": "^1.20.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "nodemailer": "^6.10.1",
+    "zod": "^3.24.2"
+  }
+}

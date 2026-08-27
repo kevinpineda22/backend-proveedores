@@ -1,0 +1,19 @@
+{
+  "functions": {
+    "src/server.js": {
+      "maxDuration": 300
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "src/server.js"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/snapshot",
+      "schedule": "0 10 * * *"
+    }
+  ]
+}
