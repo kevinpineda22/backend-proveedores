@@ -88,22 +88,19 @@ export async function crearSolicitud({ cuenta, usuario, datos, ip, userAgent }) 
     topePct: cuenta.porcentajeMax,
   });
 
-  // El 422 lleva los números. Un "excede el tope" a secas deja al proveedor
-  // adivinando cuánto puede subir, y termina en una llamada a compras que se
-  // resuelve leyendo una pantalla.
-  if (evaluacion.excede) {
-    throw createError(
-      422,
-      `El aumento supera el máximo autorizado para su cuenta. ` +
-        `Comuníquese con el área de compras de Merkahorro.`,
-      {
-        variacionPct: evaluacion.variacionPct,
-        topePct: evaluacion.topePct,
-        costoActual: evaluacion.costoActual,
-        costoPropuesto: evaluacion.costoPropuesto,
-      },
-    );
-  }
+  // EL TOPE AVISA, NO FRENA — decidido por Johan el 2026-08-27.
+  //
+  // Antes esto era un 422 y la solicitud no nacía. Ya no: una propuesta que
+  // supera el tope se crea igual, queda marcada, y la decide un humano.
+  //
+  // El tope pasó de ser un candado a ser una ETIQUETA, y eso mueve la única
+  // defensa automática al escritorio del admin. Es sostenible porque nada llega
+  // a SIESA sin su aprobación explícita — pero SOLO si la marca se ve. Por eso
+  // `excede` viaja en la respuesta al proveedor y la bandeja lo devuelve por
+  // fila: que se pierda de vista es la forma en que esta decisión sale mal.
+  //
+  // `porcentaje_max_vigente` se congela en la fila igual que antes: el histórico
+  // tiene que poder decir qué tope regía el día que se propuso.
 
   const datosFirma = {
     cuentaId: cuenta.id,

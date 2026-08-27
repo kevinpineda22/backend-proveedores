@@ -137,7 +137,7 @@ export function variacion(costoActual, costoPropuesto) {
  *
  * Reglas, todas deliberadas:
  *
- * - Solo bloquea SUBIDAS. Una baja de costo nos favorece y pasa siempre, por
+ * - Solo MARCA subidas. Una baja de costo nos favorece y nunca se señala, por
  *   grande que sea.
  * - `topePct = null` es SIN TOPE, no 0%. Confundirlos congelaría a todos los
  *   proveedores que nadie configuró todavía, sin que nadie entienda por qué.
@@ -155,6 +155,27 @@ export function variacion(costoActual, costoPropuesto) {
  *   topePct: number|null, excede: boolean
  * }}
  */
+/**
+ * ¿Una variación supera el tope? Definición ÚNICA, y por eso vive acá.
+ *
+ * Se usa en dos momentos distintos: al crear la solicitud (con los números
+ * recién calculados) y al mostrarla en la bandeja del admin (con los números ya
+ * guardados en la fila). Si cada lugar la resolviera por su cuenta, un día el
+ * proveedor vería "dentro del tope" y el admin "lo excede" sobre la misma fila.
+ *
+ * `topePct = null` es SIN TOPE, no 0%.
+ *
+ * @param {number} variacionPct  Variación en puntos porcentuales (5 = 5%).
+ * @param {number|null} topePct  Tope en puntos porcentuales.
+ * @returns {boolean}
+ */
+export function excedeTope(variacionPct, topePct) {
+  const tope = topePct == null || topePct === "" ? null : Number(topePct);
+  if (tope == null || !Number.isFinite(tope)) return false;
+  const v = Number(variacionPct);
+  return Number.isFinite(v) && v > 0 && v > tope;
+}
+
 export function evaluarPropuesta({
   precioActual,
   descuentosActuales = [],
@@ -171,12 +192,14 @@ export function evaluarPropuesta({
     throw new RangeError(`Tope porcentual inválido: ${JSON.stringify(topePct)}`);
   }
 
+  const variacionPct = Math.round((v * 100 + Number.EPSILON) * 1e4) / 1e4;
+
   return {
     costoActual: cActual,
     costoPropuesto: cPropuesto,
     variacion: v,
-    variacionPct: Math.round((v * 100 + Number.EPSILON) * 1e4) / 1e4,
+    variacionPct,
     topePct: tope,
-    excede: tope != null && v > 0 && v * 100 > tope,
+    excede: excedeTope(variacionPct, tope),
   };
 }

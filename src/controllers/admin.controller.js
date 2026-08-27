@@ -1,6 +1,7 @@
 import { supabase } from "../config/supabase.js";
 import { createError } from "../middleware/errorHandler.js";
 import { aprobar, rechazar } from "../services/solicitud.service.js";
+import { excedeTope } from "../services/costoNeto.js";
 
 /** Maestro de proveedores: NIT, sucursales, correo asociado, tope. */
 export async function maestro(req, res, next) {
@@ -77,7 +78,17 @@ export async function bandeja(req, res, next) {
       .limit(500);
 
     if (error) throw new Error(error.message);
-    res.json({ solicitudes: data ?? [] });
+
+    // El tope ya no frena al proveedor: marca la fila para el admin. Se deriva
+    // acá, con la MISMA función que usó la creación, en vez de guardarse en una
+    // columna — así no hay dos verdades sobre la misma fila ni migración que
+    // correr, y `porcentaje_max_vigente` ya viaja congelado en cada solicitud.
+    const solicitudes = (data ?? []).map((s) => ({
+      ...s,
+      excede_tope: excedeTope(s.variacion_pct, s.porcentaje_max_vigente),
+    }));
+
+    res.json({ solicitudes });
   } catch (e) {
     next(e);
   }

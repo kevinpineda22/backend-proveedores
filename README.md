@@ -81,7 +81,9 @@ otra consulta, no un permiso faltante.
 ## Cinco cosas que no hay que romper
 
 1. **El tope se evalúa sobre el costo neto, no sobre el precio.** Bajar un
-   descuento sube lo que pagamos aunque el precio no se mueva.
+   descuento sube lo que pagamos aunque el precio no se mueva. Desde el
+   2026-08-27 el tope **avisa, no frena**: la marca en la bandeja es la única
+   defensa automática que queda, así que no se suaviza ni se esconde.
 2. **Los impuestos se re-emiten con la fecha nueva**, o el ítem los pierde.
 3. **El `cuenta_id` sale del JWT**, nunca del body.
 4. **Aprobar toma la solicitud antes de empujar** a SIESA.

@@ -443,7 +443,8 @@ trigger ata a todos. Una firma que se puede editar no es una firma.
 
 **`pp_proveedores` no tiene política de RLS: el proveedor nunca la lee.** Ahí vive
 `porcentaje_max`. El tope es configuración interna, y el proveedor solo necesita
-conocerlo en el momento en que lo choca — el 422 se lo dice con el número exacto.
+conocerlo en el momento en que lo choca — la respuesta a su solicitud se lo dice
+con el número exacto.
 
 **La escritura de solicitudes no se expone al cliente.** RLS da `SELECT` sobre las
 propias, nada más. Un `INSERT` directo desde el navegador se saltearía la
@@ -473,8 +474,23 @@ en la llamada.
 
 ## 6. La regla del porcentaje
 
-El admin le pone un tope a cada proveedor (ej: 5%). Si la subida lo excede, el
-proveedor no puede ni enviar la solicitud.
+El admin le pone un tope a cada proveedor (ej: 5%).
+
+> **EL TOPE AVISA, NO FRENA** — decidido por Johan el 2026-08-27.
+>
+> Antes, una subida por encima del tope moría en un 422 y la solicitud no nacía.
+> Ya no: se crea igual, queda marcada, y **la decide un humano**.
+>
+> El tope pasó de candado a **etiqueta**, y eso mueve la única defensa automática
+> al escritorio del admin. Es sostenible porque nada llega a SIESA sin su
+> aprobación explícita — pero **solo mientras la marca se vea**. Un aviso discreto
+> en una bandeja de treinta filas se vuelve invisible al tercer día, y ahí el
+> tope deja de existir sin que nadie lo haya derogado.
+>
+> Por eso la marca vive en tres lugares y ninguno es decorativo:
+> la respuesta al proveedor (`excede`), la fila de la bandeja
+> (`pp-bandeja__fila--excede`) y un cartel arriba del comparativo en el detalle.
+> Si algún día alguien "limpia" el diseño de la bandeja, esto es lo que no se toca.
 
 ### El tope se evalúa sobre el COSTO NETO, no sobre el precio
 
@@ -530,9 +546,13 @@ Reglas:
 - **Solo aplica a subidas.** Una baja de costo nos favorece: no se bloquea.
 - **`porcentaje_max = NULL` significa sin tope**, no 0%. Un 0 mal interpretado
   congelaría a todos los proveedores sin que nadie entienda por qué.
-- Excedido → **422** con el tope y la variación calculada, para que el proveedor
-  vea el número y sepa que tiene que comunicarse con compras. No un error
-  genérico.
+- Excedido → la solicitud **se crea igual**, marcada. El proveedor recibe un
+  **201** con `excede: true` y el número del tope, para que sepa que se pasó en
+  el momento y no tres días después con el rechazo. El admin la ve señalada.
+- `excedeTope()` en `services/costoNeto.js` es la **única** definición de
+  "excede". La usan la creación (con números recién calculados) y la bandeja (con
+  números ya guardados). Si cada lugar la resolviera por su cuenta, un día el
+  proveedor leería "dentro del tope" y el admin "lo excede" sobre la misma fila.
 - El tope vigente se **congela** en la solicitud (`porcentaje_max_vigente`). Si
   el admin lo cambia después, el histórico sigue diciendo cuál regía ese día.
 

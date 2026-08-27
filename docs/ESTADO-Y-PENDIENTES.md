@@ -49,7 +49,7 @@ de producción el 2026-08-27.
 
 | Caso | Resultado |
 |---|---|
-| +4,93% | **422** con los números exactos en `detalle` |
+| +4,93% | **201** creada y **marcada** — desde el 2026-08-27 el tope avisa, no frena |
 | +0,50% | **201** creada |
 | Repetir el mismo ítem | **409** ya hay una pendiente |
 | Ítem de **otro proveedor** | **404** no está en su catálogo |
