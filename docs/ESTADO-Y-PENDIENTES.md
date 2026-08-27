@@ -92,9 +92,9 @@ aparece en el maestro, y a ese no se le puede asociar un correo.
    `porcentaje_max` y `bloqueado` con los defaults y borra los topes que compras
    configuró a mano.
 
-#### b) ¿Los descuentos son en CASCADA o ADITIVOS?
+#### b) ¿Los descuentos son en CASCADA o ADITIVOS? — ✅ RESUELTO
 
-**Estado:** asumido cascada, sin confirmar con compras.
+**Estado:** **CASCADA**, confirmado por compras el 2026-08-27.
 
 ```
 cascada:  4.672 × 0,97 × 0,98 = 4.441,20
@@ -105,7 +105,13 @@ aditivo:  4.672 × 0,95        = 4.438,40
 (53 con dos, 23 con tres). En esos 76, los dos modos dan números distintos — y ese
 número decide si una propuesta pasa el tope.
 
-**Qué hacer:** preguntarle a compras. Si es aditivo, cambiar la constante
+Se buscaron por fuerza bruta las combinaciones donde el modo **voltea** la
+decisión del tope: aparecieron **4.862**. Ejemplo con tope del 5% — descuentos de
+20% y 20%, bajando el segundo a 16% sin tocar el precio: cascada da +5,00% (pasa)
+y aditivo +6,67% (bloquea). Por eso valía preguntarlo.
+
+**Resultado:** el supuesto era correcto. **No hubo que cambiar una sola línea de
+cálculo.** Si algún día compras cambia de criterio, es la constante
 `MODO_DESCUENTO` en `services/costoNeto.js` **y su gemelo del frontend**
 (`utils/costoNeto.js`). Los dos, o divergen.
 
@@ -290,7 +296,7 @@ Si algo de esto se "simplifica", el sistema sigue compilando y empieza a cobrar 
 
 ## 7. Preguntas abiertas para el negocio
 
-1. **¿Cascada o aditivo?** (bloqueante — punto 3.1.b)
+1. ~~**¿Cascada o aditivo?**~~ ✅ **CASCADA**, confirmado por compras el 2026-08-27.
 2. **¿El tope es por NIT o por sucursal?** Hoy por NIT. El modelo aguanta bajarlo
    a sucursal con una columna nullable en `pp_cuentas` que pise a la del NIT.
 3. **¿Qué pasa si el precio de SIESA cambia entre la solicitud y la aprobación?**

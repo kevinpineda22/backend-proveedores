@@ -12,7 +12,6 @@ El contrato exacto con SIESA (consultas, conector, formatos, riesgos) vive en
 Bloqueado por:
 - Consulta de **terceros** SIESA (falta) — el maestro se deriva provisionalmente
   de las cotizaciones, así que un proveedor sin precios cargados no aparece.
-- **¿Descuentos en cascada o aditivos?** Sin confirmar con compras (§6).
 - La **primera aprobación real** contra SIESA, nunca ejecutada.
 
 Ya NO bloquea:
@@ -503,8 +502,9 @@ variacion  = (costo_neto_propuesto − costo_neto_actual) / costo_neto_actual
 Implementado y probado en `src/services/costoNeto.js` (16 tests, incluidos los dos
 escenarios de arriba con los números de Altipal).
 
-> **⚠️ SIN CONFIRMAR CON COMPRAS, y ya no es teórico:** si los descuentos por
-> orden se componen en **cascada** o se **suman**. Se asume cascada (`MODO_DESCUENTO`).
+> **✅ CONFIRMADO POR COMPRAS (2026-08-27): es CASCADA.** Se preguntó con el
+> ejemplo de $4.672 con 3% y 2%, y la respuesta fue $4.441,20 — el segundo
+> descuento sobre el saldo del primero. `MODO_DESCUENTO = "cascada"` queda firme.
 >
 > El snapshot COMPLETO (18.866 cotizaciones) mostró **76 renglones con dos o tres
 > descuentos**: 53 con dos y 23 con tres. En esos 76, los dos modos dan números

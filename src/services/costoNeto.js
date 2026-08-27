@@ -36,12 +36,18 @@
  * `aditivo`: los porcentajes se suman y se aplican una vez.
  *   4.672 con 3% y 2% → 4.672 × 0,95 = 4.438,40
  *
- * SIN CONFIRMAR CON COMPRAS. Se asume `cascada` porque es lo que significa un
- * "orden" de descuento en SIESA: hay una secuencia, y una secuencia se aplica en
- * secuencia. La diferencia entre los dos modos es nula mientras haya un solo
- * descuento —el caso de toda la data de muestra de Altipal—, así que no bloquea
- * el desarrollo, pero SÍ hay que confirmarlo antes de producción: con dos o tres
- * órdenes activas los números se separan y la separación es plata.
+ * ✅ CONFIRMADO POR COMPRAS (2026-08-27): es CASCADA. Se preguntó con el ejemplo
+ * de arriba —$4.672 con 3% y 2%— y la respuesta fue $4.441,20, o sea el segundo
+ * descuento aplicado sobre el saldo del primero.
+ *
+ * Coincide con lo que ya se asumía, así que no hubo que cambiar el cálculo. Pero
+ * la confirmación importa igual: se buscaron por fuerza bruta las combinaciones
+ * donde el modo VOLTEA la decisión del tope y aparecieron 4.862. Ejemplo: con
+ * descuentos de 20% y 20%, bajando el segundo a 16% sin tocar el precio, cascada
+ * da +5,00% y aditivo +6,67%. Contra un tope del 5%, uno pasa y el otro no.
+ *
+ * Si algún día compras cambia de criterio, se cambia esta constante Y su gemelo
+ * del frontend (`utils/costoNeto.js`). Los dos, o divergen.
  */
 export const MODO_DESCUENTO = "cascada";
 
