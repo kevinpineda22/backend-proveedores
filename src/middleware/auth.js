@@ -67,7 +67,7 @@ export function motivoDeBloqueo(cuenta) {
     case "activo":
       return null;
     case "suspendido":
-      return "Su cuenta está suspendida. Comuníquese con el área de compras de Merkahorro.";
+      return "Su cuenta está suspendida. Comuníquese con Merkahorro.";
     case "invitado":
       return "Su cuenta todavía no está activada. Use el enlace de invitación que recibió por correo.";
     case "sin_invitar":
@@ -177,14 +177,14 @@ export async function requiereProveedor(req, res, next) {
  * `bloqueado` no cierra la sesión: el proveedor sigue viendo su catálogo y sus
  * solicitudes anteriores. Solo se le corta proponer cambios. Un bloqueo que
  * además esconde la información deja al proveedor sin poder ni entender por qué
- * lo llamaron — y a compras sin nada que mostrarle en la llamada.
+ * lo llamaron — y a Merkahorro sin nada que mostrarle en la llamada.
  */
 export function puedeProponer(req, res, next) {
   if (req.cuenta?.bloqueado) {
     return next(
       createError(
         403,
-        "Su cuenta tiene los cambios de precio bloqueados. Comuníquese con el área de compras de Merkahorro.",
+        "Su cuenta tiene los cambios de precio bloqueados. Comuníquese con Merkahorro.",
       ),
     );
   }
@@ -192,12 +192,12 @@ export function puedeProponer(req, res, next) {
 }
 
 /**
- * Superficie del ADMIN de compras. Router aparte, middleware aparte.
+ * Superficie del ADMIN del portal. Router aparte, middleware aparte.
  *
  * LA AUTORIDAD ES `pp_admins`, NO `profiles.role`.
  *
  * `profiles.role` es una sola columna: exigir `role = 'pp_admin'` obligaría a
- * cada persona de compras a RENUNCIAR al rol que ya tiene en la app. La propia
+ * cada administrador a RENUNCIAR al rol que ya tiene en la app. La propia
  * app ya chocó con eso —de ahí `profiles.ecommerce_rol`, una segunda columna de
  * rol agregada para un módulo— y agregar una tercera no arregla el problema, lo
  * repite.

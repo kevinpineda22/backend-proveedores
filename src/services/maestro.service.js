@@ -24,7 +24,7 @@
    `porcentaje_max`, `bloqueado` y todo lo de `pp_cuentas` (correo, user_id,
    estado) son datos NUESTROS, no de SIESA. El upsert los deja intactos: si esta
    sincronización los sobrescribiera, cada corrida del cron borraría los topes que
-   compras configuró a mano y desactivaría a los proveedores ya invitados.
+   Merkahorro configuró a mano y desactivaría a los proveedores ya invitados.
    ============================================================================= */
 
 import { supabase } from "../config/supabase.js";
@@ -85,7 +85,7 @@ const enLotes = (arr, tam = 500) => {
  * NO BORRA NADA. Un proveedor que dejó de tener cotizaciones sigue en el maestro
  * con su cuenta y su historial de solicitudes. Borrarlo dejaría solicitudes
  * huérfanas y le cortaría el acceso a alguien que quizá solo está entre
- * negociaciones. El alta es automática; la baja es una decisión de compras.
+ * negociaciones. El alta es automática; la baja es una decisión de Merkahorro.
  *
  * @returns {Promise<{proveedores: number, cuentas: number, duracionMs: number}>}
  */
@@ -96,7 +96,7 @@ export async function sincronizarMaestro(cotizaciones = []) {
   for (const lote of enLotes(proveedores)) {
     // `ignoreDuplicates` es la pieza clave: si el proveedor ya existe, NO se toca.
     // Sin esto, cada corrida pisaría `porcentaje_max` y `bloqueado` con los
-    // defaults, borrando los topes que compras configuró a mano.
+    // defaults, borrando los topes que Merkahorro configuró a mano.
     const { error } = await supabase
       .from("pp_proveedores")
       .upsert(lote, { onConflict: "nit", ignoreDuplicates: true });

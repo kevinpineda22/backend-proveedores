@@ -1,4 +1,7 @@
-# Contrato SIESA — Cotizaciones de Compras
+# Contrato SIESA — conector `Cotizaciones_Compras`
+
+> `Cotizaciones_Compras` es el NOMBRE DEL DOCUMENTO en SIESA (idDocumento 253851),
+> no una etiqueta nuestra. Es un contrato con el ERP: renombrarlo rompe el empuje.
 
 > Este documento describe **exactamente** qué se lee y qué se escribe en SIESA.
 > Si un campo no está acá, no se manda. Si un formato no coincide con esta tabla,
@@ -101,7 +104,8 @@ portal y al re-emitir uno perdería su impuesto.**
 > dicen `IBU3`. Las llaves observadas son **`ICO`** e **`IBU3`**, y nada más.
 > Ningún código hardcodea la llave —se lee del dato—, pero si mañana alguien
 > escribe una lista de impuestos conocidos, que la copie de acá y no del correo.
-> Vale confirmar con compras si hay más llaves que esta consulta no muestra.
+> Vale confirmarlo con quien lleve la relación comercial, por si hay más llaves
+> que esta consulta no muestra.
 
 Ojo con un caso que apareció: hay filas con impuesto declarado en **valor 0**
 (`{"llave":"IBU3","valor":0}`). El normalizador las conserva, porque un impuesto

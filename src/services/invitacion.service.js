@@ -28,7 +28,7 @@ const URL_PORTAL = () =>
  *
  * Mientras el portal solo corre en local, `PORTAL_PROVEEDORES_URL` apunta a
  * localhost — y está bien para probar. El problema es el día que alguien de
- * compras invite a un proveedor REAL sin que nadie se acordó de cambiarla: el
+ * Merkahorro invite a un proveedor REAL sin que nadie se acordó de cambiarla: el
  * correo sale perfecto, el proveedor hace clic, y aterriza en su propia máquina.
  *
  * Nadie se entera hasta que el proveedor llama por teléfono. Por eso se detecta y
@@ -170,7 +170,7 @@ export async function invitar({ cuentaId, correo, admin, ip }) {
  * probar tokens.
  */
 export async function activar({ token, clave }) {
-  const generico = "El enlace no es válido o ya venció. Solicite uno nuevo al área de compras.";
+  const generico = "El enlace no es válido o ya venció. Solicite uno nuevo a Merkahorro.";
 
   if (!token || String(clave ?? "").length < 8) {
     throw createError(422, "La contraseña debe tener al menos 8 caracteres.");
@@ -355,7 +355,7 @@ El enlace vence en ${HORAS_VIGENCIA} horas y solo puede usarse una vez.
 
 Después podrá ingresar con su NIT, su sucursal y la contraseña que defina.
 
-Si no esperaba este correo, ignórelo o comuníquese con el área de compras de Merkahorro.`;
+Si no esperaba este correo, ignórelo o comuníquese con Merkahorro.`;
 
 const htmlInvitacion = ({ cuenta, enlace }) => `
 <div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;color:#1f2933">
@@ -381,7 +381,7 @@ const htmlInvitacion = ({ cuenta, enlace }) => `
       Después podrá ingresar con su NIT, su sucursal y la contraseña que defina.
     </p>
     <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.6">
-      Si no esperaba este correo, ignórelo o comuníquese con el área de compras de Merkahorro.
+      Si no esperaba este correo, ignórelo o comuníquese con Merkahorro.
     </p>
   </div>
 </div>`;

@@ -73,7 +73,7 @@ test("solo una cuenta activa puede operar", () => {
 });
 
 test("cada estado inactivo explica qué hacer, no solo que no se puede", () => {
-  assert.match(motivoDeBloqueo({ estado: "suspendido" }), /compras/i);
+  assert.match(motivoDeBloqueo({ estado: "suspendido" }), /merkahorro/i);
   assert.match(motivoDeBloqueo({ estado: "invitado" }), /invitación/i);
   assert.match(motivoDeBloqueo({ estado: "sin_invitar" }), /habilitada/i);
   assert.match(motivoDeBloqueo({ estado: "vaya_a_saber" }), /no está habilitada/i);
@@ -92,7 +92,7 @@ test("los mensajes van en usted: el portal habla con terceros", () => {
   }
 });
 
-/* ── esAdminActivo — la autoridad del panel de compras ───────────────────── */
+/* ── esAdminActivo — la autoridad del panel de administración ───────────────────── */
 
 test("solo una fila ACTIVA de pp_admins da acceso", () => {
   // Se compara contra `activo`, no contra la existencia de la fila: un admin
@@ -103,7 +103,7 @@ test("solo una fila ACTIVA de pp_admins da acceso", () => {
 });
 
 test("sin fila en pp_admins no hay acceso", () => {
-  // El caso normal: alguien de la app con sesión válida que no es de compras.
+  // El caso normal: alguien de la app con sesión válida que no es administrador del portal.
   assert.equal(esAdminActivo(null), false);
   assert.equal(esAdminActivo(undefined), false);
 });

@@ -1,10 +1,19 @@
 # Portal de Proveedores — todo lo pendiente
 
-Actualizado el **2026-08-28**, después de cubrir la recuperación de contraseña.
+Actualizado el **2026-08-28**.
 
-Este archivo es la lista de trabajo. Para entender **por qué** el sistema está
-armado como está, `ARQUITECTURA.md`; para el detalle de SIESA, `CONTRATO-SIESA.md`;
-para el recorrido completo, `COMO-FUNCIONA.md`.
+**Este archivo es la única fuente del ESTADO del proyecto**: qué falta, qué hay en
+la base y qué no hay que romper. Si un dato de estado aparece en otro documento y
+contradice a este, gana este.
+
+Los otros tres no se pisan con este ni entre ellos:
+
+| Documento | Es dueño de |
+|---|---|
+| `ARQUITECTURA.md` | El **porqué**: identidad, modelo de datos, aislamiento, regla del % |
+| `COMO-FUNCIONA.md` | El **recorrido**: qué pasa y en qué orden |
+| `CONTRATO-SIESA.md` | El **ERP**: qué se lee y qué se escribe |
+| `README.md` | La **puerta de entrada**: arrancar, variables, endpoints |
 
 ---
 
@@ -16,12 +25,17 @@ están cerrados.
 
 | | |
 |---|---|
-| Tests | **167** backend · **65** frontend, todos verdes |
+| Tests | **167** backend · **65** frontend (portal), todos verdes |
 | Catálogo | 18.866 cotizaciones · 337 proveedores |
-| Cuentas activas | 1 — Altipal 800186960/006 (de prueba) |
+| Cuentas activas | 2 — Altipal 800186960: **006** (CATALOGO GENERAL) y **009** (BABARIA) |
 | Admins del portal | 1 |
 | Backend | `backend-proveedores.vercel.app`, escribiendo en **QA** |
-| Frontend | solo localhost |
+| Frontend | **desplegado** en `https://merkahorro.com/portal-proveedores` (build viejo) |
+| Entrada desde el sitio | Header → **Ingresar → Proveedores** |
+
+**Probado a mano de punta a punta el 2026-08-28**: login de proveedor, correo de
+creación de contraseña, selector de sucursal con dos cuentas, y envío de una
+propuesta de descuento. El circuito del proveedor no tiene pendientes de código.
 
 ---
 
@@ -36,14 +50,16 @@ Alcanza para trabajar, pero **solo ve proveedores CON cotizaciones cargadas**: u
 tercero dado de alta en SIESA sin precios no aparece, y a ese no se le puede
 asociar un correo.
 
-**Cuando llegue** — está detallado en `ESTADO-Y-PENDIENTES.md` §3.1.a:
+**Cuando llegue:**
 
-1. Cargarla en Connekta **sin `ORDER BY`, sin `;`, sin comentarios**.
+1. Cargarla en Connekta como consulta nueva, mismo procedimiento que
+   `CONSULTA-COTIZACIONES.sql`: **sin `ORDER BY`, sin `;`, sin comentarios**.
 2. **Copiar SU `ConniKey` y `ConniToken`** — cada consulta dinámica tiene los
    suyos. Un 401 que dice *"verifique si tiene permisos"* casi siempre es esto.
+   Si son distintos a los actuales, hay que decidir cómo conviven en el `.env`.
 3. Reescribir `sincronizarMaestro()` para leer de ahí. **Solo esa función.**
 4. **Mantener `ignoreDuplicates: true`** en los upsert, o cada corrida del cron
-   borra los topes que compras configuró a mano.
+   borra los topes que Merkahorro configuró a mano.
 
 ### 1.2 · Verificar en SIESA QA que el precio entró
 
@@ -59,18 +75,46 @@ comprobar**: lee de PRODUCCIÓN y el conector escribe en QA.
 Hasta que alguien lo mire en la pantalla del ERP, lo que tenemos es la palabra de
 SIESA, no la confirmación.
 
-### 1.3 · Desplegar el frontend
+### 1.3 · Cerrar el despliegue del frontend
 
-Al hacerlo, **lo primero**:
+**Verificado el 2026-08-28 contra producción — el frontend YA ESTÁ DESPLEGADO.**
+Este documento decía "solo localhost" y era falso.
+
+Lo que se comprobó desde `https://merkahorro.com`:
+
+| | |
+|---|---|
+| `/portal-proveedores/ingreso` | renderiza el portal |
+| Rewrite SPA (`public/.htaccess`) | presente — `/activar?token=` no da 404 |
+| CSP | permite el backend en la versión activa y en la endurecida |
+| `fetch` real al backend | **200**, devuelve las 2 sucursales |
+
+Faltan **tres** cosas, ninguna de código:
+
+**a) `PORTAL_PROVEEDORES_URL` sigue en localhost (en Vercel).** Es lo único que
+rompe a un proveedor real: el correo le llega con un enlace a una máquina ajena.
 
 ```
-PORTAL_PROVEEDORES_URL=https://merkahorro.com/portal-proveedores   (en Vercel)
-VITE_PROVEEDORES_API_URL=https://backend-proveedores.vercel.app/api  (en el front)
+PORTAL_PROVEEDORES_URL=https://merkahorro.com/portal-proveedores
 ```
 
-Mientras `PORTAL_PROVEEDORES_URL` apunte a localhost, un proveedor real recibe un
-correo con un enlace a su propia máquina. El panel avisa (`enlaceEsLocal()`), pero
-el aviso está para que nadie se olvide, no para convivir con el problema.
+**b) `www.merkahorro.com` NO está en `CORS_ORIGENES`.** El apex pasa; el `www`
+responde 200 **sin redirigir al apex**, así que un proveedor que escriba "www"
+recibe la página y el navegador le bloquea TODAS las llamadas a la API. Se ve
+como "el portal está roto", sin un error que lo explique. Agregar el origen, o
+redirigir `www` → apex en el hosting.
+
+**c) El build desplegado es viejo.** Todavía dice "área de compras" y tiene el
+banner de cookies en voseo. Un `npm run deploy` lo alinea.
+
+**No hace falta que `PORTAL_PROVEEDORES_URL` sirva a localhost y a producción a
+la vez** — y no podría: el correo lleva UN enlace. Para desarrollar, el token no
+está atado a la URL (`activar()` lo valida por hash contra la base, sin mirar
+origen): se copia el token y se pega en `localhost:5173/portal-proveedores/activar?token=…`.
+CORS ya admite `localhost:5173`. Y `PROVEEDORES_MAIL_PRUEBA=true` devuelve el
+enlace en la respuesta, sin mandar correo.
+
+---
 
 ### 1.4 · Pasar el conector a producción
 
@@ -85,8 +129,8 @@ Hacerlo **después** de 1.2, no antes.
 ### 2.1 · ¿Hay más llaves de impuesto además de ICO e IBU3?
 
 Son las dos que aparecen en los datos. La documentación del conector decía
-"IBUA", que **no existe**. Vale confirmar con compras si hay más que esta consulta
-no muestre.
+"IBUA", que **no existe**. Vale confirmarlo con quien lleve la relación comercial, por si hay más que esta
+consulta no muestre.
 
 Ningún código hardcodea la llave —se lee del dato— pero si alguien escribe una
 lista de impuestos conocidos, que la copie de los datos y no del correo.
@@ -94,7 +138,7 @@ lista de impuestos conocidos, que la copie de los datos y no del correo.
 ### 2.2 · ¿El tope es por NIT o por sucursal?
 
 Hoy **por NIT**. El modelo aguanta bajarlo a sucursal con una columna nullable en
-`pp_cuentas` que pise a la del NIT. Es una decisión de compras, no técnica.
+`pp_cuentas` que pise a la del NIT. Es una decisión de negocio, no técnica.
 
 ### 2.3 · ¿Qué pasa si el precio de SIESA cambia entre la solicitud y la aprobación?
 
@@ -103,41 +147,23 @@ si eso amerita una advertencia más fuerte o un rechazo automático.
 
 ---
 
-## 3. SUBIR LO QUE ESTÁ SIN COMMITEAR
+## 3. LO QUE ESTÁ SIN SUBIR
 
-**Backend — 7 archivos** (6 modificados + este documento nuevo):
+**Lo dice `git status`, no este archivo.**
 
-```
-M README.md
-M docs/ESTADO-Y-PENDIENTES.md
-M src/middleware/validators.js        ← validador de recuperar contraseña
-M src/routes/index.js                 ← ruta /publico/recuperar
-M src/services/invitacion.service.js  ← solicitarRecuperacion() con fallo seguro al invalidar tokens anteriores
-M src/services/invitacion.service.test.js ← recuperación cubierta por pruebas
-?? docs/PENDIENTES.md
+```bash
+cd BACKEND/backend-proveedores && git status --short
+cd Pagina-web_React        && git status --short
 ```
 
-La recuperación quedó cubierta: si Supabase no puede invalidar los tokens
-anteriores, el servicio se detiene y no emite otro enlace potencialmente válido.
+Acá hubo una lista de 40 archivos enumerados a mano. Envejeció en un día: se
+commitearon unos, aparecieron otros, y la lista pasó a describir un pasado que ya
+no existía. **Un documento que copia `git status` tiene garantizado mentir.**
 
-**Frontend — 33 archivos** (13 modificados + 20 nuevos). Los nuevos:
+Lo único que vale anotar es lo que `git status` NO puede decirte:
 
-```
-components/AccesoIncorrecto.jsx + .css   la puerta equivocada, explicada
-components/AdminsPortal.jsx + .css       gestión de administradores
-components/Cargando.jsx                  esqueletos de carga
-components/InicioProveedor.jsx + .css    el inicio del proveedor
-components/Paginacion.jsx + .css         barra de páginas
-components/PortalLayout.jsx + .css       sidebar + contenido
-hooks/reintentos.js                      no reintentar los 4xx
-hooks/useAdmins.js
-styles/pp-shared.css                     primitivos sobre los tokens --sfc-*
-utils/bandeja.js + .test.js              orden por tope
-utils/paginacion.js + .test.js           paginar y numerosVisibles
-utils/resumenProveedor.js + .test.js     el resumen del inicio
-```
-
-**Vercel corre sin la recuperación de contraseña** hasta que subas el backend.
+> **Vercel corre el backend de la rama subida.** Si tocaste algo del backend y no
+> lo subiste, el portal desplegado NO lo tiene, aunque tu local funcione.
 
 ---
 
@@ -266,7 +292,7 @@ cd C:/Users/johan.sanchez/Desktop/Pagina-web_React && npm run dev
 | Entrar como | Dónde |
 |---|---|
 | Proveedor | `/portal-proveedores/ingreso` — NIT 800186960, suc. 006 |
-| Compras | `/portal-proveedores/maestro` |
+| Administrador | `/portal-proveedores/maestro` |
 
 Correr el snapshot a mano:
 

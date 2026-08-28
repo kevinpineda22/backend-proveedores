@@ -53,7 +53,7 @@ suba, se cambia.
 
 Mientras tanto, `enlaceEsLocal()` lo detecta y el panel avisa al invitar: *"la
 cuenta quedó invitada, pero el enlace apunta a una dirección local y NO le va a
-funcionar al proveedor"*. Sin ese aviso, compras invitaría a un proveedor real, el
+funcionar al proveedor"*. Sin ese aviso, Merkahorro invitaría a un proveedor real, el
 correo saldría perfecto, y nadie se enteraría hasta que el proveedor llame.
 
 #### CSP: no hubo que tocarlo
@@ -122,7 +122,7 @@ portal está poblado.
 | `/portal-proveedores/ingreso` | pública |
 | `/portal-proveedores/activar?token=` | pública |
 | `/portal-proveedores` | pública en el router, **cerrada por el backend** |
-| `/portal-proveedores/maestro` | protegida (compras) |
+| `/portal-proveedores/maestro` | protegida (admin) |
 
 Las tres primeras van en `publicRoutes` de `RouterApp.jsx` **a propósito**: el
 guard de `protectedRoutes` exige una fila en `profiles`, y el proveedor —un
@@ -239,7 +239,7 @@ Dos superficies, dos roles, un solo login:
 
 | Superficie | Quién entra | Qué ve |
 |---|---|---|
-| Admin | Merkahorro (compras) | Maestro de proveedores, bandeja de aprobaciones |
+| Admin | Merkahorro | Maestro de proveedores, bandeja de aprobaciones |
 | Proveedor | Tercero externo | Solo sus cotizaciones y sus solicitudes |
 
 El proveedor **nunca** ve el maestro. No es que se le oculte el menú: es que el
@@ -258,7 +258,7 @@ Nomenclatura de este proyecto — prefijo `pp_` (Portal Proveedores):
 | Cosa | Nombre |
 |---|---|
 | Rol del proveedor | `pp_proveedor` |
-| Rol del admin de compras | `pp_admin` |
+| Rol del admin del portal | `pp_admin` |
 | Tablas Supabase | `pp_proveedores`, `pp_cuentas`, `pp_solicitudes_precio`, … |
 | Prefijo CSS | `pp-` |
 | Carpeta frontend | `src/pages/PortalProveedores/` |
@@ -282,7 +282,7 @@ en Supabase Auth. El correo verdadero del proveedor vive aparte, en
 ```
 NIT 900123456, sucursal 02
   → identidad Auth:  900123456-02@proveedores.merkahorro.com
-  → correo real:     compras@ejemplo.com   (solo notificaciones)
+  → correo real:     contacto@ejemplo.com  (solo notificaciones)
 ```
 
 Una cuenta por **sucursal**. Aislamiento limpio: la sucursal 02 no puede leer
@@ -470,7 +470,7 @@ recibieron, y romperlos no aporta seguridad.
 
 Un proveedor bloqueado sigue viendo su catálogo y sus solicitudes anteriores;
 solo no puede proponer cambios. Un bloqueo que además esconde la información deja
-al proveedor sin entender por qué lo llamaron, y a compras sin nada que mostrarle
+al proveedor sin entender por qué lo llamaron, y a Merkahorro sin nada que mostrarle
 en la llamada.
 
 ---
@@ -523,7 +523,9 @@ escenarios de arriba con los números de Altipal).
 
 > **✅ CONFIRMADO: es CASCADA.** Y no por la palabra de nadie — por una captura
 > de la pantalla de ítems de SIESA (2026-08-27), donde el ERP muestra su propia
-> cuenta. `MODO_DESCUENTO = "cascada"` queda firme. Ver ESTADO §3.1.b.
+> cuenta. `MODO_DESCUENTO = "cascada"` queda firme. La captura de SIESA y la cuenta
+> que lo prueban están en `src/services/costoNeto.js`, al lado de la constante que
+> decide — el mejor lugar para que nadie la afloje sin leerla.
 >
 > El snapshot COMPLETO (18.866 cotizaciones) mostró **76 renglones con dos o tres
 > descuentos**: 53 con dos y 23 con tres. En esos 76, los dos modos dan números

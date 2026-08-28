@@ -4,7 +4,7 @@ API del **Portal de Proveedores** de Merkahorro.
 
 Un proveedor externo entra con NIT + sucursal, ve el catálogo de precios que le
 compramos, y **propone** un ajuste con fecha de activación. Firma la propuesta.
-Compras la aprueba o la rechaza. Al aprobar, el cambio se escribe en SIESA.
+Merkahorro la aprueba o la rechaza. Al aprobar, el cambio se escribe en SIESA.
 
 Producción: **https://backend-proveedores.vercel.app**
 
@@ -14,8 +14,7 @@ Producción: **https://backend-proveedores.vercel.app**
 
 | Si querés… | Leé |
 |---|---|
-| **Qué falta hacer** | [`docs/PENDIENTES.md`](docs/PENDIENTES.md) ← empezá acá |
-| **Retomar el proyecto** | [`docs/ESTADO-Y-PENDIENTES.md`](docs/ESTADO-Y-PENDIENTES.md) §0 |
+| **Retomar el proyecto o ver qué falta** | [`docs/PENDIENTES.md`](docs/PENDIENTES.md) ← empezá acá |
 | **Entender cómo funciona, paso a paso** | [`docs/COMO-FUNCIONA.md`](docs/COMO-FUNCIONA.md) |
 | Entender por qué está armado así | [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) |
 | Tocar algo que hable con SIESA | [`docs/CONTRATO-SIESA.md`](docs/CONTRATO-SIESA.md) |
@@ -83,16 +82,11 @@ otra consulta, no un permiso faltante.
 
 ---
 
-## Cinco cosas que no hay que romper
+## Las seis cosas que no hay que romper
 
-1. **El tope se evalúa sobre el costo neto, no sobre el precio.** Bajar un
-   descuento sube lo que pagamos aunque el precio no se mueva. Desde el
-   2026-08-27 el tope **avisa, no frena**: la marca en la bandeja es la única
-   defensa automática que queda, así que no se suaviza ni se esconde.
-2. **Los impuestos se re-emiten con la fecha nueva**, o el ítem los pierde.
-3. **El `cuenta_id` sale del JWT**, nunca del body.
-4. **Aprobar toma la solicitud antes de empujar** a SIESA.
-5. **Ninguna fecha pasa por `new Date()`** — el servidor corre en UTC.
+Viven en **[`docs/PENDIENTES.md`](docs/PENDIENTES.md) §7**, con el dato real que
+demostró cada una.
 
-El porqué de cada una está en `ESTADO-Y-PENDIENTES.md` §6, con los datos reales
-que lo demostraron.
+No se copian acá a propósito: esta lista ya estuvo duplicada en cuatro archivos y
+llegó a decir "cinco" en unos y "seis" en otros. Una regla que protege plata no
+puede tener dos versiones.

@@ -91,7 +91,7 @@ const dependencias = (cliente, extras = {}) => ({
 });
 
 test("detecta un portal apuntando a la máquina de desarrollo", () => {
-  // El caso que evita: compras invita a un proveedor real, el correo sale bien,
+  // El caso que evita: Merkahorro invita a un proveedor real, el correo sale bien,
   // el proveedor hace clic y aterriza en su propia máquina. Nadie se entera
   // hasta que llama por teléfono.
   for (const u of [

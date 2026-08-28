@@ -7,7 +7,7 @@ sistema. Los otros documentos explican *por qué* está armado así:
 |---|---|
 | `ARQUITECTURA.md` | Las decisiones de diseño y sus razones |
 | `CONTRATO-SIESA.md` | Qué se lee y qué se escribe en SIESA |
-| `ESTADO-Y-PENDIENTES.md` | Estado real y pendientes con detalle |
+| `PENDIENTES.md` | El estado real y todo lo que falta |
 | Este | El recorrido completo, en orden, sin justificaciones |
 
 ---
@@ -16,10 +16,10 @@ sistema. Los otros documentos explican *por qué* está armado así:
 
 Un proveedor externo entra con **NIT + sucursal + contraseña**, ve el catálogo de
 precios que Merkahorro le compra, y **propone** un ajuste con fecha de activación.
-Firma la propuesta. Compras la ve en una bandeja, la aprueba o la rechaza. Al
+Firma la propuesta. Merkahorro la ve en una bandeja, la aprueba o la rechaza. Al
 aprobar, el cambio se escribe en SIESA.
 
-Dos superficies, un solo login: **admin** (compras) y **proveedor** (tercero).
+Dos superficies, un solo login: **admin** (Merkahorro) y **proveedor** (tercero).
 
 ---
 
@@ -37,7 +37,7 @@ El par NIT+sucursal se convierte en un email que es la identidad real en Auth:
 ```
 NIT 900123456, sucursal 02
    → identidad Auth:  900123456-02@proveedores.merkahorro.com
-   → correo real:     compras@ejemplo.com   (SOLO para notificaciones)
+   → correo real:     contacto@ejemplo.com  (SOLO para notificaciones)
 ```
 
 Una cuenta **por sucursal**. La sucursal 02 no puede leer datos de la 01, aunque
@@ -81,7 +81,7 @@ Y recibe **solo esto**, nunca más:
 #### PASO 2 — Elige su sucursal
 
 De la lista que devolvió el paso 1. Si el NIT no tiene sucursales habilitadas, la
-lista viene vacía y se muestra un mensaje que manda a compras.
+lista viene vacía y se muestra un mensaje que manda a Merkahorro.
 
 #### PASO 3 — Escribe su contraseña
 
@@ -109,7 +109,7 @@ mira el **estado** de la cuenta:
 |---|---|
 | `activo` | Entra |
 | `sin_invitar` / `invitado` | **403** — todavía no activó su cuenta |
-| `suspendido` | **403** — comuníquese con compras |
+| `suspendido` | **403** — comuníquese con Merkahorro |
 | sin fila en `pp_cuentas` | **403** — no tiene cuenta de proveedor |
 
 Si da 403, el front **cierra la sesión**. No lo deja adentro a medias.
@@ -361,107 +361,18 @@ utils/     costoNeto · emailSintetico · fechas   (los tres con test)
 
 ## 5. Las seis cosas que no hay que romper
 
-Si algo de esto se "simplifica", el sistema sigue compilando y empieza a cobrar mal.
-
-1. **El tope se evalúa sobre el COSTO NETO, no sobre el precio.**
-2. **Los impuestos se RE-EMITEN con la fecha nueva**, o el ítem los pierde.
-3. **El `cuenta_id` sale del JWT**, nunca del body.
-4. **Aprobar TOMA la solicitud antes de empujar** a SIESA.
-5. **Ninguna fecha pasa por `new Date()`** — el servidor corre en UTC, Colombia
-   es UTC−5. Este proyecto se topó con el huso cuatro veces.
-6. **La marca de "supera el tope" tiene que verse.** Desde que el tope avisa en
-   vez de frenar, esa marca es la única defensa automática que queda.
+Están en **[`PENDIENTES.md`](PENDIENTES.md) §7**. Una sola copia, con el dato real
+que demostró cada una.
 
 ---
 
 ## 6. Lo que falta por implementar
 
-### 6.1 Bloqueantes
+Está en **[`PENDIENTES.md`](PENDIENTES.md)**: bloqueantes en §1, decisiones de
+negocio en §2, deuda conocida en §5.
 
-#### a) La consulta de TERCEROS de SIESA — *pedida, no entregada*
-
-Hoy el maestro se **deriva** de la consulta de cotizaciones, y eso alcanza para
-trabajar, pero solo ve proveedores **con cotizaciones cargadas**. Un tercero dado
-de alta en SIESA al que todavía no se le puso ningún precio no aparece, y a ese
-no se le puede asociar un correo.
-
-Cuando llegue:
-
-1. Cargarla en Connekta como consulta nueva (sin `ORDER BY`, sin `;`, sin
-   comentarios).
-2. **Copiar SU ConniKey y ConniToken** — cada consulta dinámica tiene los suyos.
-   Un 401 de "verifique si tiene permisos" casi siempre es esto.
-3. Reescribir `sincronizarMaestro()` para leer de ahí. **Solo esa función**: las
-   tablas, los endpoints y el panel ya tienen la forma final.
-4. Mantener `ignoreDuplicates: true` en los upsert, o cada corrida pisa los topes
-   que compras configuró a mano.
-
-#### b) La primera aprobación real contra SIESA — *nunca se ejecutó*
-
-Todo se probó **hasta el borde del POST**. `PROVEEDORES_SANDBOX=true` corta justo
-antes de mandar y deja el payload en el log.
-
-**La primera aprobación tiene que hacerse así**, mirando el payload:
-
-- ¿Los tres bloques tienen los nombres exactos?
-- ¿Las fechas están en `AAAAMMDD`?
-- ¿El precio tiene 20 caracteres — `000000000004900.0000`?
-- ¿Los impuestos vigentes se re-emiten con la fecha NUEVA?
-
-Recién después se saca la variable y se aprueba de verdad **en QA**. Pasar a
-producción es cambiar una sola variable.
-
-> Los tests verifican que armamos el payload como creemos que hay que armarlo.
-> **No verifican que SIESA lo acepte.** Hasta que no haya una cotización creada
-> en QA, este punto está en "debería andar".
-
-### 6.2 Para salir a producción
-
-#### c) Desplegar el frontend y apuntar las URLs
-
-Hoy el portal solo corre en localhost.
-
-```
-PORTAL_PROVEEDORES_URL=https://merkahorro.com/portal-proveedores
-VITE_PROVEEDORES_API_URL=https://backend-proveedores.vercel.app/api
-```
-
-**Es lo primero que hay que cambiar.** Mientras apunte a localhost, un proveedor
-real recibe un correo con un enlace a su propia máquina. El panel avisa
-(`enlaceEsLocal()`), pero el aviso está para que nadie se olvide.
-
-#### d) Sacar `PROVEEDORES_SANDBOX`
-
-Después del punto (b). Mientras esté, **nada se escribe en SIESA**.
-
-#### e) ~~Pantalla para administrar admins del portal~~ — ✅ HECHO (2026-08-27)
-
-Tercera pestaña del panel de compras. Listar, agregar por correo, desactivar.
-**Nunca borrar**: la auditoría de quién aprobó qué apunta a esas filas.
-
-Tres guardas: el correo se resuelve contra `profiles` (no contra `auth.users`,
-donde también viven los proveedores); nunca se llega a cero admins activos; y no
-hay DELETE en ningún lado.
-
-### 6.3 Deuda conocida — no bloquea
-
-- **El sistema de rutas de la app.** `RutaProtegida.jsx` autoriza ~30 rutas a
-  cualquier usuario logueado sin mirar el rol. El portal lo esquiva con su propia
-  tabla `pp_admins`. Documentado en `PortalProveedores/RUTAS.md`.
-- **Rate limit en memoria.** Cuenta por instancia de lambda; en Vercel N
-  instancias multiplican el límite por N. Es un lomo de burro, no un muro.
-- **`prop-types`.** ESLint se queja en los componentes nuevos. Ningún componente
-  del repo los tiene. Si se adopta, se adopta para todo `src/`.
-- **¿Aparece `IV03` (IVA) en las cotizaciones?** Se vio en una pantalla de entrada
-  por compra, no en la consulta. Conviene confirmarlo antes de la primera
-  aprobación real. El código no tiene lista blanca de llaves, así que una llave
-  nueva pasa sola.
-
-### 6.4 Preguntas abiertas para el negocio
-
-1. **¿El tope es por NIT o por sucursal?** Hoy por NIT.
-2. **¿Qué pasa si el precio de SIESA cambia entre la solicitud y la aprobación?**
-   Hoy `precio_actual` queda congelado y el admin ve el comparativo.
+Este documento explica cómo funciona lo que YA está. Lo que todavía no está
+cambia todas las semanas, y una lista de pendientes duplicada envejece mal.
 
 ---
 
@@ -470,20 +381,20 @@ hay DELETE en ningún lado.
 ```bash
 cd BACKEND/backend-proveedores
 npm install
-npm test          # 158 pruebas
+npm test          # 167 pruebas
 npm run dev       # localhost:3000
 ```
 
 ```bash
 cd Pagina-web_React
-npx vitest run src/pages/PortalProveedores   # 32 pruebas
+npx vitest run src/pages/PortalProveedores   # 65 pruebas
 npm run dev                                   # localhost:5173
 ```
 
 | Entrar como | Dónde |
 |---|---|
 | Proveedor | `/portal-proveedores/ingreso` — NIT 800186960, suc. 006 |
-| Compras | `/portal-proveedores/maestro` — con la sesión de la app |
+| Administrador | `/portal-proveedores/maestro` — con la sesión de la app |
 
 Las migraciones se corren a mano en el SQL Editor de Supabase, en orden:
 `sql/001` → `sql/002` → `sql/003`.

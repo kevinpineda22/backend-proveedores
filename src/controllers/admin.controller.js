@@ -137,7 +137,7 @@ export async function rechazarSolicitud(req, res, next) {
 /* ═══════════════════════════════════════════════════════════════════════════
    ADMINISTRADORES DEL PORTAL — `pp_admins`
 
-   Hasta hoy esta tabla se manejaba con SQL a mano: para que compras sumara a
+   Hasta hoy esta tabla se manejaba con SQL a mano: para que Merkahorro sumara a
    alguien había que pasar por desarrollo. Estos tres endpoints cierran eso.
 
    TRES REGLAS QUE NO SE NEGOCIAN

@@ -49,7 +49,7 @@
  * descuentos de 20% y 20%, bajando el segundo a 16% sin tocar el precio, cascada
  * da +5,00% y aditivo +6,67%. Contra un tope del 5%, uno pasa y el otro no.
  *
- * Si algún día compras cambia de criterio, se cambia esta constante Y su gemelo
+ * Si algún día Merkahorro cambia de criterio, se cambia esta constante Y su gemelo
  * del frontend (`utils/costoNeto.js`). Los dos, o divergen.
  */
 export const MODO_DESCUENTO = "cascada";

@@ -72,7 +72,7 @@ export async function crearSolicitud({ cuenta, usuario, datos, ip, userAgent }) 
   if (!(vigente.precio > 0)) {
     throw createError(
       409,
-      "Este producto no tiene un precio vigente en el sistema. Comuníquese con el área de compras.",
+      "Este producto no tiene un precio vigente en el sistema. Comuníquese con Merkahorro.",
     );
   }
 
