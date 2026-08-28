@@ -7,7 +7,7 @@ import * as proveedor from "../controllers/proveedor.controller.js";
 import * as admin from "../controllers/admin.controller.js";
 import { sucursalesPorNit } from "../controllers/publico.controller.js";
 import { sincronizar } from "../services/snapshot.service.js";
-import { invitar, activar } from "../services/invitacion.service.js";
+import { invitar, activar, solicitarRecuperacion } from "../services/invitacion.service.js";
 
 const router = Router();
 
@@ -35,6 +35,20 @@ publico.post(
   async (req, res, next) => {
     try {
       res.json(await activar(req.body));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+// Recuperar contraseña. Límite DURO: es un endpoint que manda correos a terceros,
+// así que sin freno es también una forma de hacerle spam a un proveedor.
+publico.post(
+  "/recuperar",
+  limitePorIp({ maximo: 3, ventanaMs: 300_000 }),
+  validar(esquemas.recuperar),
+  async (req, res, next) => {
+    try {
+      res.json(await solicitarRecuperacion({ ...req.body, ip: req.ip }));
     } catch (e) {
       next(e);
     }

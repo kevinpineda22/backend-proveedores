@@ -71,6 +71,12 @@ export const esquemas = {
     nit: z.string().trim().min(5, "NIT inválido").max(15),
   }),
 
+  /** POST /api/publico/recuperar — el proveedor pide un enlace nuevo */
+  recuperar: z.object({
+    nit: z.string().trim().min(5, "NIT inválido").max(15),
+    sucursal: z.string().trim().min(1, "Falta la sucursal").max(3),
+  }),
+
   /** POST /api/publico/activar — el proveedor define su contraseña */
   activar: z.object({
     token: z.string().min(32, "Enlace inválido"),

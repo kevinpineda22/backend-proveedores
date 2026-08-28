@@ -15,7 +15,7 @@
 import crypto from "node:crypto";
 import { supabase } from "../config/supabase.js";
 import { createError } from "../middleware/errorHandler.js";
-import { emailSintetico } from "./emailSintetico.js";
+import { emailSintetico, normalizarNit } from "./emailSintetico.js";
 import { enviar, modoPrueba } from "./email.service.js";
 
 const HORAS_VIGENCIA = Number(process.env.PROVEEDORES_INVITACION_HORAS) || 72;
@@ -222,6 +222,125 @@ export async function activar({ token, clave }) {
   return { ok: true, nit: cuenta.nit, sucursal: cuenta.sucursal };
 }
 
+/**
+ * El proveedor pide restablecer su contraseña.
+ *
+ * Reusa el MISMO mecanismo que la invitación —token de un solo uso, 72 h, hash en
+ * la base— y la MISMA pantalla de activación. No hay un segundo camino para fijar
+ * una clave: dos caminos serían dos superficies que asegurar, y una de las dos
+ * terminaría con menos cuidado que la otra.
+ *
+ * ES UN ENDPOINT PÚBLICO. Lo llama alguien sin sesión, escribiendo un NIT que
+ * puede no ser el suyo. De ahí las tres reglas:
+ *
+ *   1. La respuesta es SIEMPRE la misma, exista la cuenta o no. Si dijera "esa
+ *      cuenta no existe", cualquiera podría barrer NITs para armar la lista de
+ *      proveedores con portal activo.
+ *   2. No se devuelve el correo al que se mandó, ni enmascarado. Ese correo es de
+ *      un tercero, y ya decidimos no exponerlo (ARQUITECTURA §3.3). Cuesta alguna
+ *      llamada de soporte; delatar a quién le llega cuesta más.
+ *   3. Solo se emite para cuentas ACTIVAS. Una cuenta 'invitado' todavía tiene su
+ *      invitación viva, y una 'suspendida' no debe poder volver sola.
+ *
+ * @returns {Promise<{ok: true, enlacePrueba?: string}>} Siempre `ok`.
+ */
+export async function solicitarRecuperacion(
+  { nit, sucursal, ip },
+  {
+    cliente = supabase,
+    enviarCorreo = enviar,
+    esModoPrueba = modoPrueba,
+    generarToken = () => crypto.randomBytes(32).toString("hex"),
+    ahora = () => new Date(),
+  } = {},
+) {
+  const { data: cuenta, error: errorCuenta } = await cliente
+    .from("pp_cuentas")
+    .select("id, nit, sucursal, nombre_sucursal, estado, correo_notificacion, user_id")
+    .eq("nit", normalizarNit(nit))
+    .eq("sucursal", String(sucursal ?? "").trim())
+    .maybeSingle();
+
+  // Un fallo de base no equivale a "cuenta inexistente". Absorberlo devolvería
+  // un 200 engañoso y dejaría al proveedor esperando un correo que nunca saldrá.
+  if (errorCuenta) throw new Error(`No se pudo verificar la cuenta: ${errorCuenta.message}`);
+
+  // Se sale en silencio, con la misma forma de respuesta que el camino feliz.
+  if (!cuenta || cuenta.estado !== "activo" || !cuenta.correo_notificacion || !cuenta.user_id) {
+    console.warn(
+      `[recuperacion] pedido para ${normalizarNit(nit)}/${sucursal} sin efecto ` +
+        `(cuenta ${cuenta ? cuenta.estado : "inexistente"}).`,
+    );
+    return { ok: true };
+  }
+
+  const token = generarToken();
+  const instante = ahora();
+  const expiraAt = new Date(instante.getTime() + HORAS_VIGENCIA * 3600_000).toISOString();
+
+  // Se queman los tokens anteriores sin usar. Si el proveedor pide el enlace tres
+  // veces, solo el último sirve — si no, cada pedido dejaría otra puerta abierta
+  // durante 72 horas.
+  const { error: errorInvalidacion } = await cliente
+    .from("pp_invitaciones")
+    .update({ usado_at: instante.toISOString() })
+    .eq("cuenta_id", cuenta.id)
+    .is("usado_at", null);
+
+  // Si esto falla NO se puede emitir otro token: continuar dejaría más de un
+  // enlace válido para la misma cuenta y rompería la garantía de último enlace.
+  if (errorInvalidacion) {
+    throw new Error(`No se pudieron invalidar los enlaces anteriores: ${errorInvalidacion.message}`);
+  }
+
+  const { error } = await cliente.from("pp_invitaciones").insert({
+    cuenta_id: cuenta.id,
+    token_hash: hashear(token),
+    expira_at: expiraAt,
+    creado_por: null, // lo pidió el proveedor, no un admin
+  });
+  if (error) throw new Error(`No se pudo emitir el enlace: ${error.message}`);
+
+  const enlace = `${URL_PORTAL()}/activar?token=${token}`;
+  const local = enlaceEsLocal();
+  if (local) {
+    console.warn(
+      `[recuperacion] ⚠️  PORTAL_PROVEEDORES_URL apunta a localhost: el enlace enviado ` +
+        `a ${cuenta.correo_notificacion} NO le va a funcionar.`,
+    );
+  }
+
+  const envio = await enviarCorreo({
+    para: cuenta.correo_notificacion,
+    asunto: "Restablecer su contraseña — Portal de Proveedores Merkahorro",
+    texto: textoRecuperacion({ cuenta, enlace }),
+    html: htmlRecuperacion({ cuenta, enlace }),
+  });
+
+  const { error: errorAuditoria } = await cliente.from("pp_auditoria").insert({
+    entidad: "pp_cuentas",
+    entidad_id: String(cuenta.id),
+    accion: "recuperar_clave",
+    actor_rol: "pp_proveedor",
+    // El correo NO va al detalle: esta acción la puede disparar cualquiera desde
+    // internet, y el log no tiene por qué acumular a quién se le escribió.
+    detalle: { correoEnviado: envio.enviado, motivo: envio.motivo ?? null },
+    ip: ip ?? null,
+  });
+
+  // El correo ya pudo haber salido: devolver 500 acá invitaría al cliente a
+  // reintentar y mandar otro. La recuperación sigue siendo válida, pero el
+  // fallo de auditoría no queda invisible para monitoreo.
+  if (errorAuditoria) {
+    console.error(
+      `[recuperacion] no se pudo auditar la solicitud de la cuenta ${cuenta.id}: ` +
+        errorAuditoria.message,
+    );
+  }
+
+  return { ok: true, ...(esModoPrueba() ? { enlacePrueba: enlace } : {}) };
+}
+
 /* ── Cuerpo del correo ───────────────────────────────────────────────────── */
 
 const textoInvitacion = ({ cuenta, enlace }) =>
@@ -263,6 +382,43 @@ const htmlInvitacion = ({ cuenta, enlace }) => `
     </p>
     <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.6">
       Si no esperaba este correo, ignórelo o comuníquese con el área de compras de Merkahorro.
+    </p>
+  </div>
+</div>`;
+
+const textoRecuperacion = ({ cuenta, enlace }) =>
+  `Portal de Proveedores de Merkahorro
+
+Recibimos una solicitud para restablecer la contraseña de ${cuenta.nombre_sucursal || "su cuenta"} (NIT ${cuenta.nit}, sucursal ${cuenta.sucursal}).
+
+Para definir una contraseña nueva, ingrese aquí:
+${enlace}
+
+El enlace vence en ${HORAS_VIGENCIA} horas y solo puede usarse una vez.
+
+Si usted no pidió este cambio, ignore este correo: su contraseña actual sigue funcionando.`;
+
+const htmlRecuperacion = ({ cuenta, enlace }) => `
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;color:#1f2933">
+  <div style="background:#210d65;padding:24px;border-radius:8px 8px 0 0">
+    <h1 style="margin:0;color:#fff;font-size:20px">Restablecer contraseña</h1>
+    <p style="margin:4px 0 0;color:#cfc6ec;font-size:14px">Portal de Proveedores &middot; Merkahorro</p>
+  </div>
+  <div style="border:1px solid #d9e2ec;border-top:none;border-radius:0 0 8px 8px;padding:24px">
+    <p style="margin:0 0 16px;line-height:1.6">
+      Recibimos una solicitud para <strong>${cuenta.nombre_sucursal || "su cuenta"}</strong><br>
+      <span style="color:#64748b;font-size:14px">NIT ${cuenta.nit} &middot; Sucursal ${cuenta.sucursal}</span>
+    </p>
+    <p style="margin:0 0 24px">
+      <a href="${enlace}" style="display:inline-block;background:#210d65;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600">
+        Definir contraseña nueva
+      </a>
+    </p>
+    <p style="margin:0 0 16px;font-size:14px;color:#64748b;line-height:1.6">
+      El enlace vence en ${HORAS_VIGENCIA} horas y solo puede usarse una vez.
+    </p>
+    <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.6">
+      Si usted no pidió este cambio, ignore este correo: su contraseña actual sigue funcionando.
     </p>
   </div>
 </div>`;

@@ -14,8 +14,9 @@ Producción: **https://backend-proveedores.vercel.app**
 
 | Si querés… | Leé |
 |---|---|
+| **Qué falta hacer** | [`docs/PENDIENTES.md`](docs/PENDIENTES.md) ← empezá acá |
+| **Retomar el proyecto** | [`docs/ESTADO-Y-PENDIENTES.md`](docs/ESTADO-Y-PENDIENTES.md) §0 |
 | **Entender cómo funciona, paso a paso** | [`docs/COMO-FUNCIONA.md`](docs/COMO-FUNCIONA.md) |
-| **Retomar el proyecto** | [`docs/ESTADO-Y-PENDIENTES.md`](docs/ESTADO-Y-PENDIENTES.md) |
 | Entender por qué está armado así | [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) |
 | Tocar algo que hable con SIESA | [`docs/CONTRATO-SIESA.md`](docs/CONTRATO-SIESA.md) |
 | Cargar o cambiar la consulta | [`docs/CONSULTA-COTIZACIONES.sql`](docs/CONSULTA-COTIZACIONES.sql) |
@@ -28,7 +29,7 @@ El frontend vive en `Pagina-web_React/src/pages/PortalProveedores/`.
 
 ```bash
 npm install
-npm test      # 158 pruebas
+npm test      # 159 pruebas (backend) · 65 en el frontend
 npm run dev   # localhost:3000
 ```
 

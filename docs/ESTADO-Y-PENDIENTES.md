@@ -1,5 +1,189 @@
 # Portal de Proveedores — estado y pendientes
 
+---
+
+> **La lista de trabajo vive en [`PENDIENTES.md`](PENDIENTES.md).** Este archivo
+> guarda el detalle y la historia de cada decisión.
+
+## 0. PARA MAÑANA — leé solo esto para arrancar
+
+**Cierre del 2026-08-27.** El sistema funciona de punta a punta: un proveedor
+propone y firma, compras aprueba, y **SIESA aceptó una cotización real**
+(*"Importacion exitosa"*). Los cinco puntos del pedido original están cerrados.
+
+### Estado al cerrar
+
+| | |
+|---|---|
+| Tests | **159** backend · **40** frontend, todos verdes |
+| Catálogo | 18.866 cotizaciones · 337 proveedores · 403 cuentas |
+| Cuentas activas | 1 (Altipal 800186960/006, de prueba) |
+| Admins del portal | 1 (johanmerkahorro777) |
+| Backend | `backend-proveedores.vercel.app`, escribiendo en **QA** |
+| Frontend | solo localhost |
+
+### Lo PRIMERO al abrir mañana
+
+**1. Subir lo que quedó sin commitear.** El backend tiene 1 archivo (este doc); el
+frontend tiene **9**, entre ellos la pantalla de administradores y las guardas del
+tope:
+
+```
+M  src/pages/PortalProveedores/AdminPanel.jsx
+M  src/pages/PortalProveedores/components/BandejaAprobaciones.jsx  (+ .css)
+M  src/pages/PortalProveedores/hooks/useAprobaciones.js
+?? src/pages/PortalProveedores/components/AdminsPortal.jsx  (+ .css)
+?? src/pages/PortalProveedores/hooks/useAdmins.js
+?? src/pages/PortalProveedores/utils/bandeja.js  (+ .test.js)
+```
+
+**2. Verificar en SIESA QA que el precio entró de verdad.** Es lo único de ayer
+que quedó sin confirmar con los ojos:
+
+> Ítem **179313** (VINO SAZON BLANCO), tercero **800186960**, sucursal **006**,
+> fecha de activación **20/09/2026** → debería estar en **$13.920** con su
+> **ICO de $4.974**.
+
+SIESA respondió "Importacion exitosa", pero **nuestra consulta no lo puede
+comprobar**: lee de PRODUCCIÓN y el conector escribe en QA. Hay que mirarlo desde
+la pantalla del ERP.
+
+### Etapa A cerrada (2026-08-27)
+
+El modelo de acceso quedó completo. Lo que se agregó:
+
+| | |
+|---|---|
+| **Recuperar contraseña** | `POST /api/publico/recuperar`. Mismo token de un solo uso, misma pantalla. Respuesta idéntica exista o no la cuenta; 3 pedidos cada 5 min; solo cuentas activas |
+| **Inicio del proveedor** | Qué espera respuesta, qué se aprobó y **qué le rechazaron con el motivo**. Deriva del catálogo y las solicitudes, sin endpoint nuevo |
+| **Puerta equivocada** | `AccesoIncorrecto` explica dónde está y ofrece **las dos** salidas, en vez de una redirección muda |
+| **Design system** | Se adoptaron los tokens `--sfc-*` y se creó `styles/pp-shared.css` con primitivos `.pp-*`, igual que `traslados-shared.css` |
+
+**Un bug que apareció probando sin sesión:** TanStack Query reintenta 3 veces por
+defecto, así que durante ~7 segundos `error` seguía en `null` y la pantalla se
+dibujaba con datos vacíos — un proveedor con la sesión vencida veía su catálogo
+en cero y creía que se le había borrado todo. Se agregó `hooks/reintentos.js`:
+**los 4xx no se reintentan**, porque la respuesta va a ser la misma.
+
+### Etapa B cerrada (2026-08-27) — el pase de UI/UX
+
+| | |
+|---|---|
+| **Design system** | `styles/pp-shared.css` con primitivos `.pp-*` sobre los tokens `--sfc-*` |
+| **Puente de paleta** | `--pp-*` ahora APUNTA a `--sfc-*`: seis archivos de CSS toman el color de la casa sin reescribirlos |
+| **Esqueletos de carga** | Reemplazan los "Cargando…" en catálogo, maestro y bandeja |
+| **Estados vacíos** | Con ícono, explicación y **una salida** — nadie queda mirando una pantalla en blanco |
+| **Tipografía** | Los títulos del portal ya no quedan en otra fuente que su propio panel |
+
+**Cómo se hizo el cambio de paleta sin romper nada:** en vez de reescribir cada
+regla, las variables viejas pasaron a apuntar a los tokens corporativos. Es un
+puente, no el destino: **al escribir pantallas nuevas, usar `--sfc-*` directo.**
+
+**Los estados vacíos siempre ofrecen una salida.** "Ningún producto coincide con
+«zzzzz»" trae un botón para limpiar la búsqueda; "no hay productos cotizados"
+explica que el catálogo lo carga SIESA y a quién preguntarle. Un estado vacío sin
+salida es un callejón, y el usuario no sabe si se rompió algo o si está bien así.
+
+**Por qué esqueletos y no un spinner:** un spinner dice "esperá" y deja la
+pantalla en blanco; cuando llegan los datos, todo salta de lugar. Un esqueleto
+ocupa el mismo espacio que el contenido real y la espera se siente más corta
+aunque dure exactamente lo mismo. Con 198 filas de catálogo, esa diferencia es la
+que separa "se colgó" de "está cargando".
+
+### Etapa B, segunda parte — layout de la casa y paginación
+
+**Sidebar.** El portal usa ahora el mismo armazón que el admin de picking
+(`ecommerce/admin/PedidosAdmin`): barra oscura con degradado, navegación con
+íconos, contadores por sección y el pie con quién está conectado. `PortalLayout`
+sirve para los DOS lados —compras y proveedor— con la misma pieza y distinta
+navegación.
+
+**El ROL siempre visible** en el sidebar ("Compras" / "Proveedor"). Con dos mundos
+que no se cruzan, la pregunta "¿como quién estoy viendo esto?" tiene que tener
+respuesta sin hacer un clic.
+
+**Paginación** en el maestro (337 proveedores) y en el catálogo (198 renglones).
+`utils/paginacion.js`, función pura con 15 tests. Tres decisiones:
+
+- **La página se CORRIGE si queda fuera de rango.** Pasa siempre: alguien está en
+  la página 12, escribe en el buscador y quedan 8 resultados. Sin la corrección
+  vería una tabla en blanco y creería que su búsqueda no encontró nada.
+- **Los números colapsan con elipsis**, pero un hueco de UNA sola página se
+  rellena: la elipsis ocupa lo mismo que el número, así que esconderlo pierde
+  información sin ahorrar espacio.
+- **Cambiar un filtro vuelve a la página 1**, por lo mismo del primer punto.
+
+**Contadores solo cuando hay algo.** Un "0" permanente en el sidebar enseña a
+ignorar el lugar donde después aparece el número que sí importa. El rojo se
+reserva para lo que pide una decisión.
+
+### Lo que falta, en orden
+
+| # | Qué | Depende de |
+|---|---|---|
+| 1 | **Consulta de TERCEROS** — reemplaza el maestro provisional | SIESA |
+| 2 | **Desplegar el frontend** + apuntar `PORTAL_PROVEEDORES_URL` | vos |
+| 3 | **Pasar a producción**: `SIESA_COTIZACION_URL` de QA a prod | decisión |
+| 4 | Limpiar los datos de prueba | cuando estorben |
+
+Ninguno bloquea a los otros. El (1) es una función; el (3) es **una variable**.
+
+### Bugs conocidos, sin resolver
+
+**Ninguno abierto en el portal.** Los cuatro que aparecieron ayer están
+arreglados y documentados en §3.2 bis — vale leerlos antes de tocar el empuje o
+el manejo de errores, porque los cuatro fueron del tipo que los tests no agarran.
+
+Lo que sí queda es **deuda ajena al portal**: el sistema de rutas de la app
+(`dashboardRoutes` abre 30 rutas a cualquier usuario logueado). Está en §3.3.g y
+en `PortalProveedores/RUTAS.md`, con el plan por pasos. **No se tocó a propósito.**
+
+### Datos de prueba en la base
+
+| Qué | Detalle |
+|---|---|
+| Cuenta Altipal 800186960/006 | activa, clave `Portal2026.Prueba` |
+| Tope de Altipal | **1%** (era `NULL` — se bajó para probar la marca) |
+| Solicitud #1 | `pendiente`, SARDINAS, +2,95% — **marcada**, sirve para probar la guarda |
+| Solicitudes #2, #4 | `aplicada` en SANDBOX (no llegaron a SIESA) |
+| Solicitud #5 | `aplicada` **de verdad en QA** — no la borres sin verificar el ERP |
+
+```sql
+-- Limpieza, cuando corresponda
+DELETE FROM pp_solicitudes_precio WHERE cuenta_id = 59;
+UPDATE pp_proveedores SET porcentaje_max = NULL WHERE nit = '800186960';
+```
+
+`pp_firmas` y `pp_auditoria` son append-only por trigger: las firmas de prueba
+quedan, y está bien que queden.
+
+### Cuando llegue la consulta de terceros
+
+Está detallado en §3.1.a. El resumen:
+
+1. Cargarla en Connekta **sin `ORDER BY`, sin `;`, sin comentarios** — el
+   generador envuelve el query y esas tres cosas lo rompen.
+2. **Copiar SU ConniKey y ConniToken**: cada consulta dinámica tiene los suyos.
+   Un 401 que dice "verifique si tiene permisos" casi siempre es esto.
+3. Reescribir `sincronizarMaestro()` para leer de ahí. **Solo esa función** — las
+   tablas, los endpoints y el panel ya tienen la forma final.
+4. **Mantener `ignoreDuplicates: true`** en los upsert, o cada corrida del cron
+   borra los topes que compras configuró a mano.
+
+### Arrancar
+
+```bash
+cd C:/Users/johan.sanchez/Desktop/BACKEND/backend-proveedores && npm test && npm run dev
+cd C:/Users/johan.sanchez/Desktop/Pagina-web_React && npm run dev
+```
+
+| Entrar como | Dónde |
+|---|---|
+| Proveedor | `/portal-proveedores/ingreso` — NIT 800186960, suc. 006 |
+| Compras | `/portal-proveedores/maestro` |
+
+---
+
 Documento de retomada. Escrito el **2026-08-27**, al cierre de la primera etapa.
 
 Si volvés a este proyecto dentro de un mes y no te acordás de nada, leé este
@@ -147,8 +331,25 @@ cálculo.** Si algún día compras cambia de criterio, es la constante
 
 #### c) La primera aprobación real contra SIESA
 
-**Estado:** ✅ **verificada en SANDBOX el 2026-08-27**, contra el backend desplegado.
-Falta el POST de verdad — el sandbox corta justo antes de mandar.
+**Estado:** ✅ **CERRADO — SIESA aceptó una cotización real el 2026-08-27.**
+
+```
+Solicitud #5 · VINO SAZON BLANCO X 750 ML · ítem 179313
+$13.132,33 → $13.920 (+6,00%, con tope 1% — marcada y aprobada como excepción)
+
+Respuesta de SIESA:
+  { "codigo": 0, "detalle": "Importacion exitosa", "mensaje": "Transacción Exitosa" }
+```
+
+El payload que aceptó llevaba **dos** bloques —encabezado e impuestos, sin la
+sección vacía de descuentos— y el **ICO de $4.974 re-emitido con la fecha nueva**
+(20260920). Es el circuito completo: proponer, firmar, marcar por tope, aprobar
+como excepción, y escribir en el ERP.
+
+<details>
+<summary>El camino hasta acá (vale leerlo antes de tocar el empuje)</summary>
+
+Antes de esto se verificó en SANDBOX contra el backend desplegado.
 
 Solicitud #4 (FOUR LOKO SANDIA, ítem 177791, ICO de $5.131,73). Payload armado,
 tal como salió en el log de Vercel:
@@ -182,7 +383,7 @@ También quedó verificada la trampa de la tilde: `FECHA_ACTIVACION` en el
 encabezado y `FECHA_ACTIVACIÓN` en los otros bloques. Escribirlas iguales haría
 que SIESA rechace el bloque.
 
-**Lo que falta:** sacar `PROVEEDORES_SANDBOX` y aprobar de verdad en QA.
+</details>
 
 <details>
 <summary>Cómo se hizo (por si hay que repetirlo)</summary>
