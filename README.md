@@ -33,7 +33,7 @@ npm run dev   # localhost:3000
 ```
 
 Las migraciones se corren a mano en el SQL Editor de Supabase, en orden:
-`sql/001` → `sql/002` → `sql/003`.
+`sql/001` → `sql/002` → `sql/003` → `sql/004` → `sql/005`.
 
 ---
 

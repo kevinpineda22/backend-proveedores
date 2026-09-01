@@ -44,6 +44,8 @@ export class ConfigSiesaError extends Error {
     super(`Falta configuración de SIESA: ${faltan.join(", ")}`);
     this.name = "ConfigSiesaError";
     this.faltan = faltan;
+    // Sin credenciales no hubo llamada. Nada llegó al ERP.
+    this.enviadoASiesa = false;
   }
 }
 
@@ -260,6 +262,11 @@ async function postConector(payload) {
         "Content-Type": "application/json",
       },
       timeout: 60_000,
+      // `validateStatus: () => true` hace que un 4xx/5xx NO lance: se evalúa el
+      // cuerpo. Lo que SÍ lanza acá es un corte de red o un timeout — y ese error
+      // sale SIN `enviadoASiesa`, a propósito: no es `false` (pudo haber llegado)
+      // ni `true` (no sabemos si lo procesó). Ese "undefined" es el caso peligroso
+      // y quien lo atrape tiene que tratarlo como incierto, no como fallo limpio.
       validateStatus: () => true,
     })
     .then(({ data, status }) => ({ data, status }));
@@ -277,7 +284,19 @@ export async function importarCotizacion({ solicitudId, ...args }) {
   const faltan = configFaltante();
   if (faltan.length) throw new ConfigSiesaError(faltan);
 
-  const payload = armarPayload(args);
+  // `enviadoASiesa` distingue "el ERP lo rechazó" de "no salió de acá".
+  //
+  // El armado valida largos y formatos (ver formatoSiesa.js) y LANZA antes del
+  // POST. Sin esta marca, quien lo atrapa no puede saberlo y termina diciéndole
+  // al admin "SIESA rechazó el cambio" por un error nuestro: sale a buscar en el
+  // ERP un problema que nunca llegó ahí.
+  let payload;
+  try {
+    payload = armarPayload(args);
+  } catch (e) {
+    e.enviadoASiesa = false;
+    throw e;
+  }
 
   // SANDBOX — se corta JUSTO ANTES del POST y DESPUÉS de armar el payload: así el
   // armado, que es donde viven los bugs de formato, llave y re-emisión, se
@@ -308,6 +327,7 @@ export async function importarCotizacion({ solicitudId, ...args }) {
     err.siesaData = data;
     err.httpStatus = status;
     err.payload = payload;
+    err.enviadoASiesa = true;
     throw err;
   }
 

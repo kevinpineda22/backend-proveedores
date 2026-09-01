@@ -229,3 +229,37 @@ test("una cotización en COP pasa, con o sin la columna", () => {
   assert.equal(armar({ vigente: vigenteDe([{ ...ATUN_ALAMAR, Moneda: "COP" }]) })[BLOQUES.encabezado].length, 1);
   assert.equal(armar()[BLOQUES.encabezado].length, 1);
 });
+
+/* ── Origen del error: ¿salió de acá o lo rechazó el ERP? ────────────────── */
+
+test("un ítem de 8 dígitos NO llega a SIESA: lo frena la validación local", () => {
+  // Descubierto el 2026-08-31: el conector limita ITEM a 7 caracteres. Ya se
+  // validaba (formatoSiesa `campo.item`), pero el error salía sin decir de dónde
+  // venía y terminaba reportado como "SIESA rechazó el cambio" — mandando al
+  // admin a buscar en el ERP un problema que nunca llegó ahí.
+  assert.throws(
+    () => armar({ vigente: { ...vigenteDe([ATUN_ALAMAR]), item: "12345678" } }),
+    (e) => e instanceof RangeError && /ITEM/.test(e.message),
+  );
+});
+
+test("importarCotizacion marca los errores de armado como NO enviados", async () => {
+  const { importarCotizacion } = await import("./siesaCotizacion.js");
+
+  // Sin credenciales, ConfigSiesaError se lanza antes de cualquier llamada.
+  const previo = { k: process.env.CONNI_KEY, t: process.env.CONNI_TOKEN };
+  delete process.env.CONNI_KEY;
+  delete process.env.CONNI_TOKEN;
+
+  try {
+    await importarCotizacion({ solicitudId: 1, vigente: vigenteDe([ATUN_ALAMAR]), propuesta: PROPUESTA });
+    assert.fail("tenía que lanzar");
+  } catch (e) {
+    // `false`, no `undefined`: la diferencia entre "no salió" y "no sé si llegó"
+    // es la que decide si reintentar puede duplicar un precio.
+    assert.equal(e.enviadoASiesa, false, "un fallo de configuración nunca llegó al ERP");
+  } finally {
+    if (previo.k) process.env.CONNI_KEY = previo.k;
+    if (previo.t) process.env.CONNI_TOKEN = previo.t;
+  }
+});

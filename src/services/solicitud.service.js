@@ -11,6 +11,9 @@ import { costoNeto, evaluarPropuesta } from "./costoNeto.js";
 import { hoyEnColombia, porcentajesDescuento, separarVigentes } from "./normalizarCotizacion.js";
 import { registrarFirma, verificarFirmaDeSolicitud } from "./firma.service.js";
 import { importarCotizacion } from "./siesaCotizacion.js";
+import { verificarEnSiesa, NO_CONFIRMA } from "./verificarCotizacion.js";
+import { revalidarTope } from "./revalidarTope.js";
+import { notificarResolucion } from "./notificacion.service.js";
 
 const SELECT_COTIZACION =
   "clave, clave_item, id_tercero, nit, sucursal, moneda, item, descripcion_item, unidad_medida, fecha_activacion, precio, impuestos, descuentos";
@@ -189,7 +192,7 @@ export async function crearSolicitud({ cuenta, usuario, datos, ip, userAgent }) 
  * precio dos veces. En Traslados eso ya pasó: la misma salida se importó tres
  * veces por no tener este candado.
  */
-export async function aprobar({ solicitudId, admin, ip }) {
+export async function aprobar({ solicitudId, admin, ip, confirmaDesactualizado = false }) {
   const { data: solicitud, error } = await supabase
     .from("pp_solicitudes_precio")
     .select("*")
@@ -214,6 +217,45 @@ export async function aprobar({ solicitudId, admin, ip }) {
       ip,
     });
     throw createError(409, firma.motivo);
+  }
+
+  // ¿La marca que el admin está mirando sigue siendo cierta?
+  //
+  // `variacion_pct` se congeló al proponer. Si SIESA movió el precio desde
+  // entonces, la bandeja puede estar mostrando "dentro del tope" sobre una base
+  // que ya no existe. Ver services/revalidarTope.js.
+  //
+  // Va ANTES del candado a propósito: si frena, la solicitud tiene que quedar
+  // `pendiente` y sin marca de empuje, lista para que otro la mire.
+  const { data: cuentaTope } = await supabase
+    .from("pp_cuentas")
+    .select("nit, sucursal")
+    .eq("id", solicitud.cuenta_id)
+    .maybeSingle();
+
+  if (cuentaTope?.nit && cuentaTope?.sucursal) {
+    let revision = null;
+    try {
+      revision = revalidarTope(solicitud, await vigenteDe(cuentaTope, solicitud.clave_item));
+    } catch (e) {
+      // No poder releer no puede impedir aprobar: sería dejar el sistema colgado
+      // de una consulta. Queda el rastro y sigue.
+      console.warn(`[aprobar] no se pudo revalidar el tope de ${solicitudId}: ${e.message}`);
+    }
+
+    // Solo frena `empeora`: hoy supera el tope y al proponer NO lo superaba. Si
+    // ya lo superaba, el admin está viendo la marca roja y no hay nada nuevo que
+    // avisarle — un aviso que sale siempre deja de significar algo.
+    if (revision?.empeora && !confirmaDesactualizado) {
+      throw createErrorExpuesto(
+        409,
+        `El precio de SIESA cambió desde que se propuso: era $${revision.precioAntes} y ` +
+          `hoy es $${revision.precioHoy}. Con el precio de hoy la propuesta es del ` +
+          `${revision.variacionHoy}% y SUPERA el tope de ${solicitud.porcentaje_max_vigente}% ` +
+          `(cuando se propuso era ${revision.variacionAntes}%). Revísela antes de aprobar.`,
+        revision,
+      );
+    }
   }
 
   // El candado. Si otro admin (o un doble clic) llegó primero, esto afecta
@@ -246,15 +288,23 @@ export async function aprobar({ solicitudId, admin, ip }) {
 
   const { data: cuenta } = await supabase
     .from("pp_cuentas")
-    .select("sucursal, pp_proveedores(id_tercero)")
+    // `correo_notificacion` viaja para el aviso del final. Se pide acá y no en
+    // otra consulta: es la misma fila.
+    .select("sucursal, correo_notificacion, pp_proveedores(id_tercero)")
     .eq("id", solicitud.cuenta_id)
     .maybeSingle();
 
   vigente.idTercero = cuenta?.pp_proveedores?.id_tercero;
   vigente.sucursal = cuenta?.sucursal;
 
+  // El try envuelve SOLO el empuje. Todo lo que viene después es contabilidad
+  // NUESTRA, y no puede terminar marcando "fallida": ese estado significa "SIESA
+  // rechazó" y habilita reintentar. Si un fallo de nuestra base cayera acá, le
+  // diríamos al admin que reintente un precio que el ERP YA aceptó — o sea, que
+  // lo duplique.
+  let r;
   try {
-    const r = await importarCotizacion({
+    r = await importarCotizacion({
       solicitudId,
       vigente,
       propuesta: {
@@ -265,60 +315,246 @@ export async function aprobar({ solicitudId, admin, ip }) {
         notas: solicitud.notas ?? "",
       },
     });
-
-    await supabase
-      .from("pp_solicitudes_precio")
-      .update({ estado: "aplicada", siesa_payload: r.payload, siesa_respuesta: r.respuesta })
-      .eq("id", solicitudId);
-
-    await auditar({
-      entidad: "pp_solicitudes_precio",
-      entidadId: solicitudId,
-      accion: "aprobar",
-      estadoAnterior: "pendiente",
-      estadoNuevo: "aplicada",
-      actorUserId: admin.userId,
-      actorRol: "pp_admin",
-      detalle: { sandbox: Boolean(r.sandbox) },
-      ip,
-    });
-
-    return { id: solicitudId, estado: "aplicada", sandbox: Boolean(r.sandbox) };
   } catch (e) {
-    // Queda `fallida`, con la marca puesta: NO se reintenta sola. Con un write al
-    // ERP, "no sé si llegó" es peor que "falló", y un reintento ciego sobre un
-    // precio es un precio duplicado. Esto lo mira una persona.
-    await supabase
-      .from("pp_solicitudes_precio")
-      .update({
-        estado: "fallida",
-        siesa_payload: e.payload ?? null,
-        siesa_respuesta: e.siesaData ?? { error: String(e.message).slice(0, 800) },
-      })
-      .eq("id", solicitudId);
+    return await marcarFallida({ solicitudId, admin, ip, e });
+  }
+
+  // SIESA respondiendo "exitosa" NO prueba que el precio haya quedado: la #5
+  // lo demostró. Se relee y se compara. Ver services/verificarCotizacion.js.
+  //
+  // En sandbox no hay nada que releer —no se escribió—, así que ni se intenta:
+  // una verificación que sale "no encontrado" porque nunca se mandó es ruido.
+  const verificacion = r.sandbox
+    ? null
+    : await verificarEnSiesa({
+        idTercero: vigente.idTercero,
+        sucursal: vigente.sucursal,
+        item: solicitud.item,
+        unidadMedida: solicitud.unidad_medida,
+        fechaActivacion: solicitud.fecha_activacion,
+        precioEsperado: Number(solicitud.precio_propuesto),
+        impuestosEsperados: solicitud.impuestos_vigentes ?? [],
+      });
+
+  // "No pude comprobarlo" no es "salió mal". Solo los desenlaces que
+  // CONTRADICEN el éxito mandan la solicitud a revisión humana.
+  const incierta = Boolean(verificacion && NO_CONFIRMA.has(verificacion.estado));
+  const estadoFinal = incierta ? "incierto" : "aplicada";
+
+  const { error: errEstado } = await supabase
+    .from("pp_solicitudes_precio")
+    .update({
+      estado: estadoFinal,
+      siesa_payload: r.payload,
+      siesa_respuesta: r.respuesta,
+      siesa_verificacion: verificacion
+        ? { ...verificacion, verificado_at: new Date().toISOString() }
+        : null,
+    })
+    .eq("id", solicitudId);
+
+  // Este update NO puede fallar en silencio. Si lo hiciera —un CHECK que no
+  // conoce el estado, la migración 004 sin correr, un corte— la solicitud
+  // quedaría en "aprobada" sin payload y esta función devolvería éxito: el
+  // sistema afirmando algo que no comprobó, que es justo lo que vinimos a
+  // matar del lado de SIESA.
+  if (errEstado) {
+    console.error(
+      `[aprobar] solicitud ${solicitudId}: SIESA ACEPTÓ el cambio pero no se pudo ` +
+        `guardar el estado "${estadoFinal}": ${errEstado.message}`,
+      { payload: r.payload, respuesta: r.respuesta, verificacion },
+    );
 
     await auditar({
       entidad: "pp_solicitudes_precio",
       entidadId: solicitudId,
-      accion: "empuje_fallido",
+      accion: "estado_no_guardado",
       estadoAnterior: "aprobada",
-      estadoNuevo: "fallida",
+      estadoNuevo: "aprobada",
       actorUserId: admin.userId,
       actorRol: "pp_admin",
-      detalle: { error: String(e.message).slice(0, 800), httpStatus: e.httpStatus ?? null },
+      detalle: { intento: estadoFinal, error: String(errEstado.message).slice(0, 800) },
       ip,
     });
 
-    // EXPUESTO a propósito: el mensaje del ERP es lo único que le dice al admin
-    // qué corregir. Enmascararlo como "Error interno del servidor" —que es lo que
-    // pasaba— convierte un rechazo accionable en un misterio, y obliga a ir a
-    // buscar los logs de Vercel para operar el sistema.
+    // Queda en "aprobada" CON la marca de empuje. Es el estado seguro: el
+    // candado impide volver a empujarla y `reintentar()` no la toma, así que
+    // nadie puede duplicar el precio por accidente. Necesita una persona.
     throw createErrorExpuesto(
-      502,
-      `SIESA rechazó el cambio: ${e.message}`,
-      e.siesaData ?? null,
+      500,
+      `El cambio se envió a SIESA y fue ACEPTADO, pero no se pudo registrar en ` +
+        `la base (${errEstado.message}). NO vuelva a aprobar esta solicitud: el ` +
+        `precio ya se empujó. Avise a desarrollo.`,
+      { solicitudId, estadoIntentado: estadoFinal },
     );
   }
+
+  await auditar({
+    entidad: "pp_solicitudes_precio",
+    entidadId: solicitudId,
+    accion: "aprobar",
+    estadoAnterior: "pendiente",
+    estadoNuevo: estadoFinal,
+    actorUserId: admin.userId,
+    actorRol: "pp_admin",
+    detalle: {
+      sandbox: Boolean(r.sandbox),
+      verificacion: verificacion?.estado ?? null,
+      verificacionMotivo: verificacion?.motivo ?? null,
+    },
+    ip,
+  });
+
+  // El aviso al proveedor va ÚLTIMO y no puede romper nada: acá el precio ya se
+  // empujó al ERP. `notificarResolucion` no lanza, y un `incierto` no se avisa
+  // —no se le dice a un proveedor que su precio quedó aplicado sin haberlo
+  // comprobado—. Ver notificacion.service.js.
+  const aviso = await notificarResolucion({
+    solicitud,
+    correo: cuenta?.correo_notificacion,
+    estado: estadoFinal,
+  });
+
+  return {
+    id: solicitudId,
+    estado: estadoFinal,
+    sandbox: Boolean(r.sandbox),
+    verificacion: verificacion ?? null,
+    avisoAlProveedor: aviso,
+  };
+}
+
+/**
+ * Marca una solicitud como `fallida` cuando SIESA RECHAZÓ el empuje.
+ *
+ * Se llama SOLO desde el catch que envuelve `importarCotizacion`. Fuera de ahí,
+ * un fallo ya no es "SIESA rechazó" sino un problema nuestro, y marcarlo
+ * `fallida` invitaría a reintentar un precio que el ERP aceptó.
+ *
+ * Queda con la marca de empuje puesta: NO se reintenta sola. Con un write al
+ * ERP, "no sé si llegó" es peor que "falló", y un reintento ciego sobre un
+ * precio es un precio duplicado. Esto lo mira una persona.
+ */
+async function marcarFallida({ solicitudId, admin, ip, e }) {
+  // Tres orígenes distintos, y confundirlos manda al admin a buscar donde no es:
+  //
+  //   false      → no salió de acá (formato/config). SIESA nunca lo vio.
+  //   true       → el ERP lo rechazó explícitamente. Nada quedó escrito.
+  //   undefined  → se cortó la red o venció el timeout. NO SABEMOS si llegó.
+  //
+  // El tercero es el peligroso: es el único donde reintentar puede duplicar.
+  const origen =
+    e.enviadoASiesa === false
+      ? "local"
+      : e.enviadoASiesa === true
+        ? "rechazo_erp"
+        : "sin_respuesta";
+
+  const mensaje =
+    origen === "local"
+      ? `El cambio NO se envió a SIESA — los datos no pasaron la validación: ${e.message}`
+      : origen === "rechazo_erp"
+        ? `SIESA rechazó el cambio: ${e.message}`
+        : `No hubo respuesta de SIESA: ${e.message}. Puede haber llegado igual.`;
+
+  await supabase
+    .from("pp_solicitudes_precio")
+    .update({
+      estado: "fallida",
+      siesa_payload: e.payload ?? null,
+      siesa_respuesta: e.siesaData ?? { origen, error: String(e.message).slice(0, 800) },
+    })
+    .eq("id", solicitudId);
+
+  await auditar({
+    entidad: "pp_solicitudes_precio",
+    entidadId: solicitudId,
+    accion: "empuje_fallido",
+    estadoAnterior: "aprobada",
+    estadoNuevo: "fallida",
+    actorUserId: admin.userId,
+    actorRol: "pp_admin",
+    detalle: {
+      origen,
+      error: String(e.message).slice(0, 800),
+      httpStatus: e.httpStatus ?? null,
+    },
+    ip,
+  });
+
+  // EXPUESTO a propósito: el mensaje del ERP es lo único que le dice al admin
+  // qué corregir. Enmascararlo como "Error interno del servidor" —que es lo que
+  // pasaba— convierte un rechazo accionable en un misterio, y obliga a ir a
+  // buscar los logs de Vercel para operar el sistema.
+  // 502 solo cuando el problema es del ERP. Un fallo de validación nuestro es un
+  // 422: el admin no tiene nada que revisar allá, el dato está mal de este lado.
+  throw createErrorExpuesto(
+    origen === "local" ? 422 : 502,
+    mensaje,
+    e.siesaData ?? null,
+  );
+}
+
+/**
+ * El PROVEEDOR retira su propia propuesta.
+ *
+ * POR QUÉ EXISTE
+ * Un proveedor que se equivocó al escribir el precio quedaba atrapado: el
+ * candado `idx_pp_solicitudes_pendiente_unica` permite una sola propuesta viva
+ * por renglón, así que tampoco podía mandar la correcta. Su única salida era
+ * esperar a que le rechazaran la equivocada.
+ *
+ * LAS TRES GUARDAS
+ *
+ * 1. `cuenta_id` sale del JWT, nunca del body. Un proveedor anulando la
+ *    propuesta de otro no es un bug menor (ARQUITECTURA §5).
+ * 2. Solo en `pendiente`, y la condición viaja en el UPDATE: si un admin la tomó
+ *    entre el clic y la escritura, afecta 0 filas y no pasa nada. El precio ya
+ *    pudo haber salido hacia SIESA y el proveedor ya no manda sobre eso.
+ * 3. La firma NO se toca. `pp_firmas` es append-only y la propuesta existió;
+ *    haberla retirado no la desfirma.
+ *
+ * @returns {Promise<{id: number, estado: "anulada"}>}
+ */
+export async function anular({ solicitudId, cuenta, userId, ip }) {
+  const { data, error } = await supabase
+    .from("pp_solicitudes_precio")
+    .update({ estado: "anulada", resuelto_at: new Date().toISOString() })
+    .eq("id", solicitudId)
+    // Las dos condiciones son la guarda, no un filtro de comodidad.
+    .eq("cuenta_id", cuenta.id)
+    .eq("estado", "pendiente")
+    .select("id, item")
+    .maybeSingle();
+
+  if (error) throw new Error(`No se pudo anular: ${error.message}`);
+
+  // Mensaje deliberadamente igual para "no existe", "es de otro" y "ya se
+  // resolvió": distinguirlos le diría a un proveedor si existe la solicitud de
+  // otro. Y el 409 es el correcto para el caso real —el admin llegó primero—,
+  // que es el único que le va a pasar a un proveedor legítimo.
+  if (!data) {
+    throw createError(
+      409,
+      "La solicitud ya no está pendiente. Es posible que Merkahorro ya la haya resuelto.",
+    );
+  }
+
+  await auditar({
+    entidad: "pp_solicitudes_precio",
+    entidadId: solicitudId,
+    accion: "anular",
+    estadoAnterior: "pendiente",
+    estadoNuevo: "anulada",
+    // El actor es el proveedor, no un admin: queda con su rol para que la
+    // auditoría no lo confunda con una acción interna.
+    actorUserId: userId ?? null,
+    actorRol: "pp_proveedor",
+    detalle: { item: data.item },
+    ip,
+  });
+
+  return { id: solicitudId, estado: "anulada" };
 }
 
 /**
@@ -348,17 +584,26 @@ export async function aprobar({ solicitudId, admin, ip }) {
  * (pudo haber entrado). En el segundo caso, reintentar duplica el precio. Por eso
  * esto es una decisión humana explícita y queda registrada con nombre.
  */
+/** Estados que una persona puede devolver a la cola. Ver migración 004. */
+const REVISABLES = new Set(["fallida", "incierto"]);
+
 export async function reintentar({ solicitudId, admin, ip }) {
   const { data: solicitud, error } = await supabase
     .from("pp_solicitudes_precio")
-    .select("id, estado, siesa_respuesta")
+    .select("id, estado, siesa_respuesta, siesa_verificacion")
     .eq("id", solicitudId)
     .maybeSingle();
 
   if (error) throw new Error(`No se pudo leer la solicitud: ${error.message}`);
   if (!solicitud) throw createError(404, "La solicitud no existe");
-  if (solicitud.estado !== "fallida") {
-    throw createError(409, `Solo se puede reintentar una solicitud con problema. Esta está en "${solicitud.estado}".`);
+  // fallida = SIESA lo rechazó.  incierto = SIESA lo aceptó y la relectura
+  // no lo encontró (o lo encontró distinto). Las dos necesitan que una persona
+  // mire el ERP y decida; ninguna se reintenta sola.
+  if (!REVISABLES.has(solicitud.estado)) {
+    throw createError(
+      409,
+      `Solo se puede devolver a la cola una solicitud con problema o incierta. Esta está en "${solicitud.estado}".`,
+    );
   }
 
   const { data: vuelta, error: errUpd } = await supabase
@@ -371,9 +616,16 @@ export async function reintentar({ solicitudId, admin, ip }) {
       siesa_aplicado_at: null,
       resuelto_at: null,
       resuelto_por: null,
+      // La verificación describía el intento ANTERIOR. Dejarla puesta sobre una
+      // solicitud que volvió a "pendiente" haría que la bandeja mostrara un
+      // "no encontrado en SIESA" de un empuje que ya no existe. El porqué del
+      // reintento no se pierde: queda en pp_auditoria, que es append-only.
+      siesa_verificacion: null,
     })
     .eq("id", solicitudId)
-    .eq("estado", "fallida")
+    // La condición vuelve a mirar el estado para que dos admins no la suelten a
+    // la vez. Va sobre los dos revisables, no sobre "fallida" sola.
+    .in("estado", [...REVISABLES])
     .select("id")
     .maybeSingle();
 
@@ -384,13 +636,18 @@ export async function reintentar({ solicitudId, admin, ip }) {
     entidad: "pp_solicitudes_precio",
     entidadId: solicitudId,
     accion: "reintentar",
-    estadoAnterior: "fallida",
+    estadoAnterior: solicitud.estado,
     estadoNuevo: "pendiente",
     actorUserId: admin.userId,
     actorRol: "pp_admin",
     // Se guarda el fallo anterior: si alguien reintenta tres veces la misma cosa,
     // la auditoría tiene que poder mostrar contra qué se estrelló cada vez.
-    detalle: { falloAnterior: solicitud.siesa_respuesta ?? null },
+    detalle: {
+      falloAnterior: solicitud.siesa_respuesta ?? null,
+      // Se guarda acá porque la columna se limpia arriba: es el único rastro de
+      // por qué esta solicitud volvió a la cola.
+      verificacionAnterior: solicitud.siesa_verificacion ?? null,
+    },
     ip,
   });
 
@@ -409,7 +666,12 @@ export async function rechazar({ solicitudId, motivo, admin, ip }) {
     })
     .eq("id", solicitudId)
     .eq("estado", "pendiente")
-    .select("id")
+    // Se traen los datos del ítem para el aviso: sin esto haría falta releer la
+    // fila que se acaba de escribir.
+    .select(
+      "id, item, descripcion_item, unidad_medida, precio_propuesto, " +
+        "fecha_activacion, motivo_rechazo, cuenta_id",
+    )
     .maybeSingle();
 
   if (error) throw new Error(`No se pudo rechazar: ${error.message}`);
@@ -427,7 +689,22 @@ export async function rechazar({ solicitudId, motivo, admin, ip }) {
     ip,
   });
 
-  return { id: solicitudId, estado: "rechazada" };
+  // El aviso de RECHAZO es el que más le sirve al proveedor: es el único
+  // desenlace que le pide hacer algo —leer el motivo y decidir si vuelve a
+  // proponer—. Sin correo se entera solo si entra al portal por su cuenta.
+  const { data: cuenta } = await supabase
+    .from("pp_cuentas")
+    .select("correo_notificacion")
+    .eq("id", data.cuenta_id)
+    .maybeSingle();
+
+  const aviso = await notificarResolucion({
+    solicitud: data,
+    correo: cuenta?.correo_notificacion,
+    estado: "rechazada",
+  });
+
+  return { id: solicitudId, estado: "rechazada", avisoAlProveedor: aviso };
 }
 
 /**

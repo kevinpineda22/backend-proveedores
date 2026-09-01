@@ -1,4 +1,4 @@
-import { catalogoDe, crearSolicitud } from "../services/solicitud.service.js";
+import { catalogoDe, crearSolicitud, anular } from "../services/solicitud.service.js";
 import { supabase } from "../config/supabase.js";
 
 /** Quién soy. El frontend arma el encabezado con esto, sin pedir el maestro. */
@@ -47,6 +47,24 @@ export async function misSolicitudes(req, res, next) {
 
     if (error) throw new Error(error.message);
     res.json({ solicitudes: data ?? [] });
+  } catch (e) {
+    next(e);
+  }
+}
+
+/** POST /api/proveedor/solicitudes/:id/anular — el proveedor retira su propuesta */
+export async function anularSolicitud(req, res, next) {
+  try {
+    res.json(
+      await anular({
+        solicitudId: req.params.id,
+        // La cuenta sale del JWT (req.cuenta), nunca del body. Es la regla que
+        // aísla a un proveedor de otro — ver ARQUITECTURA §5.
+        cuenta: req.cuenta,
+        userId: req.usuario?.id,
+        ip: req.ip,
+      }),
+    );
   } catch (e) {
     next(e);
   }

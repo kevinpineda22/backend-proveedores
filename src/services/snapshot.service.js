@@ -113,6 +113,31 @@ export async function sincronizar() {
     console.warn(`[snapshot] ${descartadas.length} fila(s) descartada(s):`, porMotivo);
   }
 
+  /*
+   * ÓRDENES DE DESCUENTO QUE NO SABEMOS LEER.
+   *
+   * `ORDENES_DESCUENTO` está fijo en [1,2,3] —verificado el 2026-08-27 contra
+   * SIESA—. Si aparece un orden 4, el normalizador NI LO MIRA, y eso no se ve:
+   * la fila entra igual, con un descuento de menos. El costo neto sale más alto
+   * de lo real, el tope se calcula sobre ese número inflado, y el descuento se
+   * pierde al re-emitir.
+   *
+   * Antes esto era una nota en la documentación que decía "revisar si cambian
+   * las condiciones". Una nota no revisa nada: el cron sí. Ver PENDIENTES §5.5.
+   */
+  const conOrdenExtra = cotizaciones.filter((c) => c.ordenesDesconocidos?.length);
+  if (conOrdenExtra.length) {
+    const ordenes = [...new Set(conOrdenExtra.flatMap((c) => c.ordenesDesconocidos))].sort();
+    console.error(
+      `[snapshot] 🔴 ${conOrdenExtra.length} cotización(es) traen órdenes de descuento ` +
+        `NO soportados (${ordenes.join(", ")}). Se están DESCARTANDO: el costo neto de ` +
+        `esos ítems sale más alto de lo real y el tope calcula mal. ` +
+        `Ejemplos: ${conOrdenExtra.slice(0, 5).map((c) => c.item).join(", ")}. ` +
+        `Hay que decidir si el orden nuevo va en cascada y tocar también el gemelo ` +
+        `del front (utils/costoNeto.js). Ver PENDIENTES §5.5.`,
+    );
+  }
+
   const { count: existentes } = await supabase
     .from("pp_cotizaciones")
     .select("id", { count: "exact", head: true });
@@ -151,6 +176,10 @@ export async function sincronizar() {
     filasCrudas: crudas.length,
     cotizaciones: filas.length,
     descartadas: descartadas.length,
+    // Viaja en el resultado —y por lo tanto queda en `registrar()`— para que el
+    // día que pase se pueda ver en el histórico de corridas, no solo en un log
+    // de Vercel que rota.
+    conOrdenDescuentoNoSoportado: conOrdenExtra.length,
     barrido: { ejecutado: barrer, motivo, borradas },
     maestro,
     duracionMs: Date.now() - inicio,

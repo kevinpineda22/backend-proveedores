@@ -86,7 +86,7 @@ const TAM_PAGINA = Number(process.env.CONNEKTA_TAM_PAGINA) || 1000;
 const MAX_PAGINAS = Number(process.env.CONNEKTA_MAX_PAGINAS) || 2000;
 
 /** Una página, con los reintentos. */
-async function pedirPagina({ pagina, tamPag, idTercero }) {
+async function pedirPagina({ pagina, tamPag, idTercero, descripcion = cfg.consulta() }) {
   // Mismo formato `nombre=valor` que backend-traslado ya usa en
   // siesaStock.service.js (`parametros=f120_id=<item>`).
   const parametros = idTercero ? `IdTercero=${String(idTercero).trim()}` : undefined;
@@ -99,7 +99,7 @@ async function pedirPagina({ pagina, tamPag, idTercero }) {
         headers: { conniKey: cfg.key(), conniToken: cfg.token() },
         params: {
           idCompania: cfg.idCompania(),
-          descripcion: cfg.consulta(),
+          descripcion,
           paginacion: `numPag=${pagina}|tamPag=${tamPag}`,
           // axios omite los `undefined`: sin proveedor no se manda el parámetro.
           ...(parametros ? { parametros } : {}),
@@ -169,7 +169,45 @@ async function pedirPagina({ pagina, tamPag, idTercero }) {
  * @param {number} [opciones.tamPag]
  * @returns {Promise<object[]>} Filas crudas, tal como las manda SIESA.
  */
-export async function consultarCotizaciones({ idTercero, tamPag = TAM_PAGINA } = {}) {
+/**
+ * Nombre de la consulta de TERCEROS en Connekta, o `null` si todavía no existe.
+ *
+ * Mientras sea `null`, el maestro se sigue derivando de las cotizaciones — que
+ * funciona, pero solo ve proveedores CON precios cargados. Ver PENDIENTES §1.1.
+ */
+export const consultaTerceros = () =>
+  process.env.SIESA_CONSULTA_TERCEROS?.trim() || null;
+
+/**
+ * Recorre la consulta de TERCEROS (proveedores y sus sucursales).
+ *
+ * Devuelve las filas CRUDAS, con los mismos alias que ya usa la de cotizaciones
+ * —`IdTercero`, `NitTercero`, `RazonSocial`, `Sucursal`, `DescSucursal`—, así
+ * que el normalizador es casi el mismo. Verificado contra la respuesta real de
+ * Connekta el 2026-08-31.
+ *
+ * @throws {Error} si `SIESA_CONSULTA_TERCEROS` no está configurada. No devuelve
+ *   una lista vacía: un maestro vacío se vería igual que "no hay proveedores".
+ */
+export async function consultarTerceros({ tamPag = TAM_PAGINA } = {}) {
+  const descripcion = consultaTerceros();
+  if (!descripcion) {
+    throw new Error(
+      "Falta SIESA_CONSULTA_TERCEROS: no hay consulta de terceros configurada.",
+    );
+  }
+  return recorrer({ tamPag, descripcion });
+}
+
+/**
+ * Recorre una consulta paginada de Connekta, página por página.
+ *
+ * Extraído porque ahora hay DOS consultas —cotizaciones y terceros— y el bucle
+ * es el mismo: los reintentos, el techo de páginas y el aviso de conjunto movido
+ * valen igual para las dos. Duplicarlo garantizaba que una se arreglara y la
+ * otra no.
+ */
+async function recorrer({ tamPag, descripcion, idTercero }) {
   const faltan = configFaltante();
   if (faltan.length) throw new Error(`Falta configuración de Connekta: ${faltan.join(", ")}`);
 
@@ -179,7 +217,7 @@ export async function consultarCotizaciones({ idTercero, tamPag = TAM_PAGINA } =
   let totalRegistros = 0;
 
   do {
-    const r = await pedirPagina({ pagina, tamPag, idTercero });
+    const r = await pedirPagina({ pagina, tamPag, idTercero, descripcion });
 
     // Una página vacía antes del final significa que `total_páginas` mentía o que
     // el conjunto se movió. Cortar acá evita seguir pidiendo páginas que no existen.
@@ -193,22 +231,26 @@ export async function consultarCotizaciones({ idTercero, tamPag = TAM_PAGINA } =
 
   if (pagina > MAX_PAGINAS) {
     console.warn(
-      `[connekta] se alcanzó el techo de ${MAX_PAGINAS} páginas con ${filas.length} filas. ` +
-        `El resultado está INCOMPLETO — subí CONNEKTA_MAX_PAGINAS o revisá la consulta.`,
+      `[connekta] ${descripcion}: se alcanzó el techo de ${MAX_PAGINAS} páginas con ` +
+        `${filas.length} filas. El resultado está INCOMPLETO — subí CONNEKTA_MAX_PAGINAS.`,
     );
   }
 
-  // La paginación no es atómica: entre la página 1 y la 190, SIESA puede haber
-  // insertado o borrado cotizaciones, y el recorrido se pierde filas o repite.
+  // La paginación no es atómica: entre la primera página y la última, SIESA puede
+  // haber insertado o borrado filas, y el recorrido se pierde algunas o repite.
   // No es motivo para fallar —el snapshot con una fila de menos sirve igual— pero
   // sí para dejarlo dicho: si esto aparece siempre, la consulta necesita un
   // ORDER BY estable del lado de SIESA.
   if (totalRegistros && filas.length !== totalRegistros) {
     console.warn(
-      `[connekta] se esperaban ${totalRegistros} filas y llegaron ${filas.length}. ` +
-        `El catálogo cambió mientras se paginaba.`,
+      `[connekta] ${descripcion}: se esperaban ${totalRegistros} filas y llegaron ` +
+        `${filas.length}. El conjunto cambió mientras se paginaba.`,
     );
   }
 
   return filas;
+}
+
+export async function consultarCotizaciones({ idTercero, tamPag = TAM_PAGINA } = {}) {
+  return recorrer({ tamPag, idTercero, descripcion: cfg.consulta() });
 }

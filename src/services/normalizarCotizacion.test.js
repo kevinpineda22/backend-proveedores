@@ -7,6 +7,7 @@ import {
   hoyEnColombia,
   claveItem,
   porcentajesDescuento,
+  ordenesDesconocidos,
 } from "./normalizarCotizacion.js";
 import { costoNeto } from "./costoNeto.js";
 
@@ -246,4 +247,56 @@ test("dos monedas del mismo ítem son cotizaciones distintas", () => {
   ]);
   assert.equal(cotizaciones.length, 2);
   assert.equal(cotizaciones[1].clave.startsWith("USD|"), true);
+});
+
+/* ── Órdenes de descuento que no sabemos leer ─────────────────────────────────
+   `ORDENES_DESCUENTO` está fijo en [1,2,3]. Si SIESA manda un orden 4, el
+   normalizador no lo mira — y eso cobra dos veces en silencio: el costo neto
+   sale más alto de lo real (el tope calcula mal) y el descuento se pierde al
+   re-emitir. Estos tests son la alarma. Ver PENDIENTES §5.5. */
+
+const CRUDA_BASE = {
+  IdTercero: "1",
+  NitTercero: "800186960",
+  Sucursal: "006",
+  CodigoItem: "179313",
+  UM: "UND",
+  FechaActivacion: "2026-09-20",
+  Precio: 100,
+  PorcDsctoOrden1: 3,
+};
+
+test("una fila con solo los órdenes conocidos no dispara la alarma", () => {
+  assert.deepEqual(ordenesDesconocidos(CRUDA_BASE), []);
+});
+
+test("un orden 4 CON valor se detecta", () => {
+  assert.deepEqual(ordenesDesconocidos({ ...CRUDA_BASE, PorcDsctoOrden4: 5 }), [4]);
+});
+
+test("una columna vacía o en cero NO es un orden nuevo", () => {
+  // SIESA manda la columna igual aunque no haya descuento. Avisar por eso sería
+  // el ruido que enseña a ignorar los avisos.
+  for (const vacio of [null, undefined, "", "   ", 0, "0"]) {
+    assert.deepEqual(
+      ordenesDesconocidos({ ...CRUDA_BASE, PorcDsctoOrden4: vacio }),
+      [],
+      `${JSON.stringify(vacio)} no debería contar`,
+    );
+  }
+});
+
+test("la marca SOBREVIVE al agrupador: si se pierde ahí, la alarma nunca suena", () => {
+  // Se comprobó a mano y por poco pasa desapercibido: el agrupador reconstruye
+  // el objeto, y un campo que no viaja en `...resto` desaparece sin error.
+  const { cotizaciones } = agruparCotizaciones([{ ...CRUDA_BASE, PorcDsctoOrden4: 5 }]);
+  assert.equal(cotizaciones.length, 1);
+  assert.deepEqual(cotizaciones[0].ordenesDesconocidos, [4]);
+});
+
+test("el orden no soportado queda FUERA del cálculo, no se inventa", () => {
+  // Marcarlo no es leerlo: el descuento sigue sin aplicarse. Meterlo en el
+  // cálculo sin decidir si va en cascada sería peor que descartarlo.
+  const { cotizaciones } = agruparCotizaciones([{ ...CRUDA_BASE, PorcDsctoOrden4: 5 }]);
+  assert.deepEqual(cotizaciones[0].descuentos, [{ orden: 1, porcentaje: 3 }]);
 });

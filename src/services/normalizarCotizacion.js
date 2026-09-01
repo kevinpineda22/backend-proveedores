@@ -28,6 +28,40 @@ export const MONEDA = "COP";
 /** Órdenes de descuento que la consulta expone. El conector admite hasta 9. */
 export const ORDENES_DESCUENTO = [1, 2, 3];
 
+/**
+ * ¿La fila trae un orden de descuento que NO sabemos leer?
+ *
+ * POR QUÉ IMPORTA, Y CUÁNTO CUESTA
+ * `ORDENES_DESCUENTO` está fijo en [1,2,3] porque el 2026-08-27 se verificó que
+ * en SIESA solo existen esos. Si mañana aparece un orden 4, el `.map()` de abajo
+ * NI LO MIRA — y se rompen dos cosas EN SILENCIO:
+ *
+ *   1. El costo neto sale MÁS ALTO de lo real, porque falta un descuento. El
+ *      tope se calcula sobre ese número inflado y deja pasar subidas que
+ *      debería marcar.
+ *   2. Ese descuento SE PIERDE al re-emitir la cotización con la fecha nueva —
+ *      el mismo mecanismo que ya le costó un ICO de $5.102 al FOUR LOKO.
+ *
+ * Descartar en silencio un dato que mueve plata es la peor forma de fallar. Esto
+ * no lo arregla —leer un orden nuevo exige decidir si va en cascada y tocar el
+ * gemelo del front— pero lo hace RUIDOSO. Ver PENDIENTES §5.5.
+ *
+ * Se mira hasta el 9: más allá no es un orden nuevo, es otra cosa.
+ */
+export function ordenesDesconocidos(cruda) {
+  const fuera = [];
+  for (let orden = 1; orden <= 9; orden++) {
+    if (ORDENES_DESCUENTO.includes(orden)) continue;
+    const valor = cruda?.[`PorcDsctoOrden${orden}`];
+    // Solo cuenta si TRAE valor. Una columna vacía es SIESA diciendo "no hay",
+    // y avisar por eso sería el ruido que enseña a ignorar los avisos.
+    if (valor != null && String(valor).trim() !== "" && Number(valor) !== 0) {
+      fuera.push(orden);
+    }
+  }
+  return fuera;
+}
+
 const num = (v) => {
   if (v == null || v === "") return null;
   const n = Number(v);
@@ -127,6 +161,9 @@ export function normalizarFila(cruda) {
         orden,
         porcentaje: num(cruda?.[`PorcDsctoOrden${orden}`]),
       })).filter((d) => d.porcentaje != null),
+      // Vacío en el 100 % de los casos de hoy. Si algún día trae algo, es un
+      // descuento que estamos tirando y que hace mal la cuenta del tope.
+      ordenesDesconocidos: ordenesDesconocidos(cruda),
     },
   };
 }

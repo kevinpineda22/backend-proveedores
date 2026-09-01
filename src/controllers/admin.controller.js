@@ -1,7 +1,8 @@
 import { supabase } from "../config/supabase.js";
 import { createError } from "../middleware/errorHandler.js";
-import { aprobar, rechazar, reintentar } from "../services/solicitud.service.js";
+import { aprobar, rechazar, reintentar, vigenteDe } from "../services/solicitud.service.js";
 import { excedeTope } from "../services/costoNeto.js";
+import { revalidarTope } from "../services/revalidarTope.js";
 
 /** Maestro de proveedores: NIT, sucursales, correo asociado, tope. */
 export async function maestro(req, res, next) {
@@ -83,10 +84,38 @@ export async function bandeja(req, res, next) {
     // acá, con la MISMA función que usó la creación, en vez de guardarse en una
     // columna — así no hay dos verdades sobre la misma fila ni migración que
     // correr, y `porcentaje_max_vigente` ya viaja congelado en cada solicitud.
-    const solicitudes = (data ?? []).map((s) => ({
-      ...s,
-      excede_tope: excedeTope(s.variacion_pct, s.porcentaje_max_vigente),
-    }));
+    //
+    // Y se REVALIDA contra el precio de hoy: `variacion_pct` se congeló el día
+    // de la propuesta, así que la marca puede estar diciendo "dentro del tope"
+    // sobre una base que SIESA ya movió. Ver services/revalidarTope.js.
+    //
+    // Solo para las PENDIENTES: son las que el admin puede aprobar, y son pocas.
+    // Revalidar el histórico sería releer el catálogo para nada.
+    const filas = data ?? [];
+    const revalidar = estado === "pendiente";
+
+    const solicitudes = await Promise.all(
+      filas.map(async (s) => {
+        const base = {
+          ...s,
+          excede_tope: excedeTope(s.variacion_pct, s.porcentaje_max_vigente),
+        };
+        if (!revalidar) return base;
+
+        const cuenta = s.pp_cuentas;
+        if (!cuenta?.nit || !cuenta?.sucursal) return base;
+
+        try {
+          const hoy = await vigenteDe(cuenta, s.clave_item);
+          return { ...base, revalidacion: revalidarTope(s, hoy) };
+        } catch (e) {
+          // Un fallo al releer NO puede tumbar la bandeja: sin ella el admin no
+          // puede operar nada. Se degrada a la marca congelada y se deja rastro.
+          console.warn(`[bandeja] no se pudo revalidar la solicitud ${s.id}: ${e.message}`);
+          return base;
+        }
+      }),
+    );
 
     res.json({ solicitudes });
   } catch (e) {
@@ -113,7 +142,16 @@ export async function verFirma(req, res, next) {
 
 export async function aprobarSolicitud(req, res, next) {
   try {
-    res.json(await aprobar({ solicitudId: req.params.id, admin: req.admin, ip: req.ip }));
+    res.json(
+      await aprobar({
+        solicitudId: req.params.id,
+        admin: req.admin,
+        ip: req.ip,
+        // El admin ya vio el aviso de precio desactualizado y decidió seguir.
+        // Viaja en el body y no en la query: es una decisión, no un filtro.
+        confirmaDesactualizado: req.body?.confirmaDesactualizado === true,
+      }),
+    );
   } catch (e) {
     next(e);
   }

@@ -71,6 +71,10 @@ rProveedor.post(
   validar(esquemas.crearSolicitud),
   proveedor.crear,
 );
+/* Anular NO lleva `puedeProponer`: un proveedor bloqueado no puede mandar
+   propuestas nuevas, pero retirar una que ya mandó es siempre suyo. Bloquearlo
+   ahí lo dejaría con una solicitud viva que no puede ni sacar ni reemplazar. */
+rProveedor.post("/solicitudes/:id/anular", proveedor.anularSolicitud);
 router.use("/proveedor", rProveedor);
 
 /* ── ADMIN ────────────────────────────────────────────────────────────────── */

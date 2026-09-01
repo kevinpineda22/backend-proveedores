@@ -28,6 +28,7 @@
    ============================================================================= */
 
 import { supabase } from "../config/supabase.js";
+import { consultaTerceros, consultarTerceros } from "../config/connekta.js";
 
 /**
  * Extrae proveedores y sucursales únicos de cotizaciones YA NORMALIZADAS.
@@ -42,6 +43,24 @@ import { supabase } from "../config/supabase.js";
  * @param {Array<{idTercero, nit, sucursal, nombreSucursal, razonSocial}>} filas
  * @returns {{proveedores: object[], cuentas: object[]}}
  */
+/**
+ * Fila CRUDA de la consulta de terceros → la forma que consume `derivarMaestro`.
+ *
+ * Los alias son los MISMOS que ya trae la de cotizaciones —se pidieron así a
+ * propósito— y los CHAR de SQL Server llegan con relleno: `"1020414979      "`.
+ * Verificado contra la respuesta real de Connekta el 2026-08-31.
+ */
+export function normalizarTercero(cruda) {
+  const t = (v) => String(v ?? "").trim();
+  return {
+    idTercero: t(cruda?.IdTercero),
+    nit: t(cruda?.NitTercero),
+    razonSocial: t(cruda?.RazonSocial),
+    sucursal: t(cruda?.Sucursal),
+    nombreSucursal: t(cruda?.DescSucursal),
+  };
+}
+
 export function derivarMaestro(filas = []) {
   const proveedores = new Map();
   const cuentas = new Map();
@@ -89,9 +108,63 @@ const enLotes = (arr, tam = 500) => {
  *
  * @returns {Promise<{proveedores: number, cuentas: number, duracionMs: number}>}
  */
+/**
+ * De dónde sale el maestro.
+ *
+ * Con `SIESA_CONSULTA_TERCEROS` configurada se lee el maestro DE VERDAD, que
+ * incluye proveedores todavía sin precios cargados. Sin ella se sigue derivando
+ * de las cotizaciones, que es lo que funciona hoy. Ver PENDIENTES §1.1.
+ *
+ * Si la consulta de terceros falla, NO se cae al fallback en silencio: un
+ * maestro derivado tiene un agujero conocido, y taparlo con un log escondido es
+ * cómo se llega a "el proveedor nuevo no aparece y nadie sabe por qué".
+ */
+async function leerFuente(cotizaciones) {
+  if (!consultaTerceros()) {
+    return { filas: cotizaciones, fuente: "pp_cotizaciones (provisional)" };
+  }
+  const crudas = await consultarTerceros();
+  return { filas: crudas.map(normalizarTercero), fuente: consultaTerceros() };
+}
+
+/**
+ * Cuántos proveedores puede PERDER una corrida antes de que se considere un
+ * filtro mal puesto. 0 = ninguno: el maestro solo debería crecer.
+ */
+const PERDIDA_TOLERADA = Number(process.env.PROVEEDORES_MAESTRO_PERDIDA_TOLERADA) || 0;
+
 export async function sincronizarMaestro(cotizaciones = []) {
   const inicio = Date.now();
-  const { proveedores, cuentas } = derivarMaestro(cotizaciones);
+  const { filas, fuente } = await leerFuente(cotizaciones);
+  const { proveedores, cuentas } = derivarMaestro(filas);
+
+  /*
+   * GUARDA DEL FILTRO. El maestro NO borra a nadie —el upsert usa
+   * `ignoreDuplicates`— así que un filtro de más no rompe nada hoy: rompe el
+   * día que alguien mire la lista y crea que ésos son todos los proveedores.
+   *
+   * El riesgo es concreto y medido: de los 337 proveedores con acuerdos de
+   * precio, 57 son PERSONAS NATURALES con NIT de cédula. Un filtro razonable a
+   * primera vista —"sacar las personas, que son empleados"— se lleva al 17 % de
+   * los proveedores reales, y nadie se entera hasta que uno llama preguntando
+   * por qué no puede entrar.
+   *
+   * Por eso se compara contra lo que YA hay. El maestro solo debería crecer.
+   */
+  const { data: existentes } = await supabase.from("pp_proveedores").select("nit");
+  const conocidos = new Set((existentes ?? []).map((p) => p.nit));
+  const traidos = new Set(proveedores.map((p) => p.nit));
+  const perdidos = [...conocidos].filter((nit) => !traidos.has(nit));
+
+  if (perdidos.length > PERDIDA_TOLERADA) {
+    console.error(
+      `[maestro] 🔴 la fuente "${fuente}" NO trae ${perdidos.length} proveedor(es) que ya ` +
+        `están en el maestro. Si es la consulta de terceros, el filtro está de más: ` +
+        `recordá que 57 proveedores legítimos tienen NIT de persona natural. ` +
+        `Ejemplos: ${perdidos.slice(0, 8).join(", ")}. ` +
+        `Nadie se borra —el upsert no borra— pero la lista quedó incompleta.`,
+    );
+  }
 
   for (const lote of enLotes(proveedores)) {
     // `ignoreDuplicates` es la pieza clave: si el proveedor ya existe, NO se toca.
@@ -114,6 +187,9 @@ export async function sincronizarMaestro(cotizaciones = []) {
   const resultado = {
     proveedores: proveedores.length,
     cuentas: cuentas.length,
+    fuente,
+    // Cuántos proveedores ya conocidos NO vinieron en esta corrida. Debe ser 0.
+    proveedoresNoTraidos: perdidos.length,
     duracionMs: Date.now() - inicio,
   };
 
@@ -122,7 +198,7 @@ export async function sincronizarMaestro(cotizaciones = []) {
       entidad: "pp_proveedores",
       accion: "sincronizar_maestro",
       actor_rol: "cron",
-      detalle: { ...resultado, fuente: "pp_cotizaciones (provisional)" },
+      detalle: { ...resultado, fuente },
     });
   } catch (e) {
     console.error("[maestro] no se pudo registrar la corrida:", e?.message);

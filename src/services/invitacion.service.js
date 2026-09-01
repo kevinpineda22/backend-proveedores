@@ -20,6 +20,14 @@ import { enviar, modoPrueba } from "./email.service.js";
 
 const HORAS_VIGENCIA = Number(process.env.PROVEEDORES_INVITACION_HORAS) || 72;
 
+/**
+ * Cuánto espera una cuenta entre dos enlaces de recuperación.
+ *
+ * 60 s es el equilibrio: corta el martilleo y no molesta a quien de verdad no vio
+ * el correo —ése mira el spam, y para cuando vuelve a pedirlo ya pasó el minuto.
+ */
+const COOLDOWN_MS = Number(process.env.PROVEEDORES_RECUPERACION_COOLDOWN_MS) || 60_000;
+
 const URL_PORTAL = () =>
   process.env.PORTAL_PROVEEDORES_URL || "http://localhost:5173/portal-proveedores";
 
@@ -274,8 +282,48 @@ export async function solicitarRecuperacion(
     return { ok: true };
   }
 
-  const token = generarToken();
   const instante = ahora();
+
+  /*
+   * FRENO POR CUENTA, no por IP.
+   *
+   * El límite por IP (middleware/rateLimit.js) cuenta en la memoria de CADA
+   * instancia serverless: en Vercel, N instancias multiplican el límite por N, y
+   * rotar IPs lo esquiva sin esfuerzo. Contra este endpoint eso importa, porque
+   * acá no se filtra información: se le MANDA UN CORREO A UN TERCERO. El daño no
+   * es a nosotros, es a la bandeja del proveedor y a nuestra reputación de envío.
+   *
+   * La defensa que sí sirve mira lo que hay que proteger —la cuenta— y vive en
+   * la base, que TODAS las instancias comparten. No hace falta Redis: la marca
+   * de tiempo ya está, porque cada pedido inserta su fila en `pp_invitaciones`.
+   *
+   * Responde igual que el camino feliz. Decir "espere un minuto" convertiría
+   * este endpoint en un oráculo: confirmaría que ese NIT+sucursal existe y está
+   * activo, que es justo lo que las respuestas iguales evitan.
+   */
+  const desde = new Date(instante.getTime() - COOLDOWN_MS).toISOString();
+  const { data: reciente, error: errorReciente } = await cliente
+    .from("pp_invitaciones")
+    .select("id")
+    .eq("cuenta_id", cuenta.id)
+    .gt("created_at", desde)
+    .limit(1);
+
+  // Un fallo de lectura NO habilita el envío: sin poder comprobar el freno, el
+  // camino seguro es no mandar. Un correo de más a un tercero no se deshace.
+  if (errorReciente) {
+    throw new Error(`No se pudo verificar el último envío: ${errorReciente.message}`);
+  }
+
+  if (reciente?.length) {
+    console.warn(
+      `[recuperacion] pedido para la cuenta ${cuenta.id} frenado: ya se emitió un ` +
+        `enlace hace menos de ${Math.round(COOLDOWN_MS / 1000)}s.`,
+    );
+    return { ok: true };
+  }
+
+  const token = generarToken();
   const expiraAt = new Date(instante.getTime() + HORAS_VIGENCIA * 3600_000).toISOString();
 
   // Se queman los tokens anteriores sin usar. Si el proveedor pide el enlace tres
@@ -357,9 +405,13 @@ Después podrá ingresar con su NIT, su sucursal y la contraseña que defina.
 
 Si no esperaba este correo, ignórelo o comuníquese con Merkahorro.`;
 
+/* Los hexes van literales porque en un correo no hay variables de CSS — pero son
+   los MISMOS que los tokens de la app (`--sfc-medium`, `--sfc-text-dark`). El
+   #210d65 y el #1f2933 que había acá eran la paleta anterior: el correo es lo
+   PRIMERO que ve un proveedor, y llegaba con la marca vieja. */
 const htmlInvitacion = ({ cuenta, enlace }) => `
-<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;color:#1f2933">
-  <div style="background:#210d65;padding:24px;border-radius:8px 8px 0 0">
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;color:#1d1d1f">
+  <div style="background:#2d1578;padding:24px;border-radius:8px 8px 0 0">
     <h1 style="margin:0;color:#fff;font-size:20px">Portal de Proveedores</h1>
     <p style="margin:4px 0 0;color:#cfc6ec;font-size:14px">Merkahorro</p>
   </div>
@@ -372,7 +424,7 @@ const htmlInvitacion = ({ cuenta, enlace }) => `
       Para crear su contraseña, use el siguiente enlace:
     </p>
     <p style="margin:0 0 24px">
-      <a href="${enlace}" style="display:inline-block;background:#210d65;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600">
+      <a href="${enlace}" style="display:inline-block;background:#2d1578;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600">
         Crear mi contraseña
       </a>
     </p>
@@ -399,8 +451,8 @@ El enlace vence en ${HORAS_VIGENCIA} horas y solo puede usarse una vez.
 Si usted no pidió este cambio, ignore este correo: su contraseña actual sigue funcionando.`;
 
 const htmlRecuperacion = ({ cuenta, enlace }) => `
-<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;color:#1f2933">
-  <div style="background:#210d65;padding:24px;border-radius:8px 8px 0 0">
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;color:#1d1d1f">
+  <div style="background:#2d1578;padding:24px;border-radius:8px 8px 0 0">
     <h1 style="margin:0;color:#fff;font-size:20px">Restablecer contraseña</h1>
     <p style="margin:4px 0 0;color:#cfc6ec;font-size:14px">Portal de Proveedores &middot; Merkahorro</p>
   </div>
@@ -410,7 +462,7 @@ const htmlRecuperacion = ({ cuenta, enlace }) => `
       <span style="color:#64748b;font-size:14px">NIT ${cuenta.nit} &middot; Sucursal ${cuenta.sucursal}</span>
     </p>
     <p style="margin:0 0 24px">
-      <a href="${enlace}" style="display:inline-block;background:#210d65;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600">
+      <a href="${enlace}" style="display:inline-block;background:#2d1578;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600">
         Definir contraseña nueva
       </a>
     </p>

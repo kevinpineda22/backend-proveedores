@@ -19,8 +19,18 @@ function clienteRecuperacion({
   errorInvalidacion = null,
   errorInsercion = null,
   errorAuditoria = null,
+  // Freno por cuenta: qué devuelve la consulta de "¿ya se emitió uno recién?".
+  // Por defecto, nada — o sea, sin envío reciente.
+  emisionReciente = [],
+  errorReciente = null,
 } = {}) {
-  const llamadas = { consultas: [], invalidaciones: [], invitaciones: [], auditorias: [] };
+  const llamadas = {
+    consultas: [],
+    frenos: [],
+    invalidaciones: [],
+    invitaciones: [],
+    auditorias: [],
+  };
 
   const cliente = {
     from(tabla) {
@@ -44,6 +54,26 @@ function clienteRecuperacion({
 
       if (tabla === "pp_invitaciones") {
         return {
+          // El freno por cuenta: select().eq().gt().limit(). Devuelve filas si
+          // hubo una emisión dentro del cooldown.
+          select() {
+            const filtros = [];
+            const consulta = {
+              eq(campo, valor) {
+                filtros.push([campo, valor]);
+                return consulta;
+              },
+              gt(campo, valor) {
+                filtros.push([campo, valor]);
+                return consulta;
+              },
+              async limit() {
+                llamadas.frenos.push(filtros);
+                return { data: emisionReciente, error: errorReciente };
+              },
+            };
+            return consulta;
+          },
           update(cambios) {
             const filtros = [];
             return {
@@ -350,4 +380,87 @@ test("un fallo de auditoría se reporta sin provocar un segundo correo", async (
   assert.deepEqual(resultado, { ok: true });
   assert.equal(errores.length, 1);
   assert.match(errores[0], /cuenta 17: tabla bloqueada/);
+});
+
+/* ── Freno por cuenta ─────────────────────────────────────────────────────────
+   El límite por IP cuenta en memoria de cada instancia serverless: en Vercel se
+   multiplica por N y rotar IPs lo esquiva. Contra este endpoint eso importa
+   porque no filtra datos — MANDA UN CORREO A UN TERCERO. La defensa que sirve
+   mira la cuenta y vive en la base, que todas las instancias comparten. */
+
+test("un segundo pedido dentro del minuto NO manda otro correo", async () => {
+  const { cliente, llamadas } = clienteRecuperacion({
+    emisionReciente: [{ id: 1 }], // ya se emitió uno hace poco
+  });
+  let envioIntentado = false;
+
+  const resultado = await solicitarRecuperacion(
+    { nit: "800186960", sucursal: "006", ip: "192.0.2.10" },
+    dependencias(cliente, {
+      enviarCorreo: async () => {
+        envioIntentado = true;
+        return { enviado: true };
+      },
+    }),
+  );
+
+  assert.equal(envioIntentado, false, "no se le manda un segundo correo al proveedor");
+  assert.equal(llamadas.invitaciones.length, 0, "ni se emite otro token");
+  assert.equal(llamadas.invalidaciones.length, 0, "ni se queman los anteriores");
+});
+
+test("el freno responde IGUAL que el camino feliz: no es un oráculo", async () => {
+  // Decir "espere un minuto" confirmaría que ese NIT+sucursal existe y está
+  // activo — justo lo que las respuestas iguales evitan.
+  const conFreno = await solicitarRecuperacion(
+    { nit: "800186960", sucursal: "006", ip: "192.0.2.10" },
+    dependencias(clienteRecuperacion({ emisionReciente: [{ id: 1 }] }).cliente),
+  );
+  const sinCuenta = await solicitarRecuperacion(
+    { nit: "999999999", sucursal: "001", ip: "192.0.2.10" },
+    dependencias(clienteRecuperacion({ cuenta: null }).cliente),
+  );
+
+  assert.deepEqual(conFreno, { ok: true });
+  assert.deepEqual(conFreno, sinCuenta);
+});
+
+test("el freno mira la CUENTA y una ventana de tiempo, no la IP", async () => {
+  const { cliente, llamadas } = clienteRecuperacion();
+  await solicitarRecuperacion(
+    { nit: "800186960", sucursal: "006", ip: "192.0.2.10" },
+    dependencias(cliente),
+  );
+
+  const filtros = llamadas.frenos[0] ?? [];
+  const campos = filtros.map(([campo]) => campo);
+  assert.ok(campos.includes("cuenta_id"), "filtra por cuenta");
+  assert.ok(campos.includes("created_at"), "y por ventana de tiempo");
+  // Si alguna vez alguien lo cambia por IP, este test lo agarra: la IP no es lo
+  // que hay que proteger — la bandeja del proveedor sí.
+  assert.equal(campos.includes("ip"), false);
+});
+
+test("si NO se puede comprobar el freno, no se manda nada", async () => {
+  // Un correo de más a un tercero no se deshace. Sin poder verificar, el camino
+  // seguro es no enviar — y decirlo, no absorberlo en un 200 silencioso.
+  const { cliente, llamadas } = clienteRecuperacion({ errorReciente: { message: "falló select" } });
+  let envioIntentado = false;
+
+  await assert.rejects(
+    () =>
+      solicitarRecuperacion(
+        { nit: "800186960", sucursal: "006", ip: "192.0.2.10" },
+        dependencias(cliente, {
+          enviarCorreo: async () => {
+            envioIntentado = true;
+            return { enviado: true };
+          },
+        }),
+      ),
+    /No se pudo verificar el último envío/,
+  );
+
+  assert.equal(envioIntentado, false);
+  assert.equal(llamadas.invitaciones.length, 0);
 });
