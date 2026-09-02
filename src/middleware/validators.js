@@ -19,11 +19,39 @@ const descuento = z.object({
   porcentaje: z.number().min(0).max(100),
 });
 
+/* Cuántos decimales acepta el conector en un precio en COP.
+
+   Verificado contra SIESA QA el 2026-09-02: `4891.27` entra, `4891.275` se
+   rechaza con *"el precio no cumple con los decimales unitarios de la moneda"*.
+
+   ⚠️ SIESA ALMACENA precios con más decimales de los que su propio conector
+   acepta al escribir. En el catálogo hay **218 cotizaciones (1,2 %, 36
+   proveedores)** con 3 o 4 decimales — todas nacidas de dividir el precio de una
+   presentación: `4891.275` es la mitad de `9782.55`, `4583.3333` es un tercio.
+
+   Por eso esto se valida ACÁ y no más adentro: sin esta regla, un proveedor de
+   esos 36 proponía, FIRMABA, el admin aprobaba, y recién ahí el ERP lo rechazaba
+   con un mensaje sobre "decimales unitarios" que no le dice nada a nadie. El
+   error tiene que aparecer cuando todavía se puede corregir. */
+const DECIMALES_COP = 2;
+
+const cuentaDecimales = (n) => {
+  const [, dec = ""] = String(n).split(".");
+  return dec.length;
+};
+
+const precio = z
+  .number()
+  .positive("El precio debe ser mayor a cero")
+  .refine((n) => cuentaDecimales(n) <= DECIMALES_COP, {
+    message: `El precio no puede tener más de ${DECIMALES_COP} decimales. Redondéelo (por ejemplo, 4891,275 → 4891,27).`,
+  });
+
 export const esquemas = {
   /** POST /api/proveedor/solicitudes */
   crearSolicitud: z.object({
     claveItem: z.string().min(1, "Falta el renglón a cotizar"),
-    precioPropuesto: z.number().positive("El precio debe ser mayor a cero"),
+    precioPropuesto: precio,
     // Máximo 3: es lo que la consulta de SIESA sabe leer. Escribir un cuarto
     // orden sería cargar un descuento que después el portal no puede mostrar.
     descuentosPropuestos: z.array(descuento).max(3).default([]),

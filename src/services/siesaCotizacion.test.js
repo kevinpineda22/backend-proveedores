@@ -263,3 +263,69 @@ test("importarCotizacion marca los errores de armado como NO enviados", async ()
     if (previo.t) process.env.CONNI_TOKEN = previo.t;
   }
 });
+
+/* ── Modo SANDBOX ─────────────────────────────────────────────────────────────
+
+   `PROVEEDORES_SANDBOX=true` es el interruptor para probar el empuje sin escribir
+   en el ERP (§8 de PENDIENTES). Corta justo antes del POST y después de armar el
+   payload, así el armado —donde viven los bugs de formato y re-emisión— se
+   ejercita igual.
+
+   No tenía tests, y por eso pasó esto: el log del sandbox leía
+   `payload[BLOQUES.impuestos].length` sobre un payload que OMITE las secciones
+   vacías. Reventaba con cualquier ítem sin impuestos ni descuentos — 892 de las
+   1.237 cotizaciones de Altipal, o sea el caso más común. Y al reventar caía en
+   el catch de `marcarFallida`, diciéndole al admin que la solicitud falló, en el
+   modo que existe justamente para que nada falle.
+   ────────────────────────────────────────────────────────────────────────────── */
+
+const PELADO = {
+  ...ATUN_ALAMAR,
+  IdLlaveImpto: null,
+  ValorImpto: null,
+  PorcDsctoOrden1: null,
+  PorcDsctoOrden2: null,
+  PorcDsctoOrden3: null,
+};
+
+/** Corre `importarCotizacion` en sandbox y devuelve lo que salió, sin tocar la red. */
+async function enSandbox(vigente, propuesta) {
+  const antes = process.env.PROVEEDORES_SANDBOX;
+  const warn = console.warn;
+  process.env.PROVEEDORES_SANDBOX = "true";
+  console.warn = () => {}; // el log del sandbox es ruidoso y no es lo que se prueba
+  try {
+    const { importarCotizacion } = await import("./siesaCotizacion.js");
+    return await importarCotizacion({ solicitudId: "test", vigente, propuesta });
+  } finally {
+    console.warn = warn;
+    if (antes === undefined) delete process.env.PROVEEDORES_SANDBOX;
+    else process.env.PROVEEDORES_SANDBOX = antes;
+  }
+}
+
+test("sandbox: un ítem SIN impuestos ni descuentos no revienta el log", async () => {
+  // El caso que fallaba. Sin impuestos y con la propuesta sin descuentos, el
+  // payload trae SOLO el encabezado: las otras dos claves no existen.
+  const r = await enSandbox(vigenteDe([PELADO]), {
+    precio: 4900,
+    descuentos: [],
+    fechaActivacion: "2099-09-01",
+    notas: "sin nada",
+  });
+
+  assert.equal(r.sandbox, true);
+  assert.deepEqual(Object.keys(r.payload), [BLOQUES.encabezado]);
+});
+
+test("sandbox: no sale a la red aunque los datos sean válidos", async () => {
+  const r = await enSandbox(vigenteDe([ATUN_ALAMAR]), {
+    ...PROPUESTA,
+    fechaActivacion: "2099-09-01",
+  });
+
+  assert.equal(r.sandbox, true);
+  assert.deepEqual(r.respuesta, { sandbox: true });
+  // El armado se ejercitó igual: por eso el sandbox corta DESPUÉS de armar.
+  assert.ok(r.payload[BLOQUES.descuentos]);
+});

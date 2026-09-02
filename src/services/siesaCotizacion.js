@@ -309,10 +309,22 @@ export async function importarCotizacion({ solicitudId, ...args }) {
     // mostrar qué hay adentro — y lo que se revisa es justamente el adentro: si
     // la fecha quedó en AAAAMMDD, si el precio tiene sus 20 caracteres, si los
     // impuestos se re-emitieron. Sin esto hay que ir a buscarlo a la base.
+    // `?? []` porque las secciones VACÍAS NO EXISTEN en el payload: `armarPayload`
+    // las omite a propósito, veinte líneas más arriba —una sección vacía hace que
+    // el conector devuelva 400 (ver §7.3 de PENDIENTES).
+    //
+    // Sin esto, el sandbox reventaba con `Cannot read properties of undefined` en
+    // cualquier ítem sin impuestos NI descuentos, que es el caso MÁS COMÚN: 892 de
+    // las 1.237 cotizaciones de Altipal no tienen ninguno de los dos. O sea que el
+    // interruptor para "probar sin consecuencias" fallaba justo en lo más frecuente,
+    // y al caer en el catch de `marcarFallida` le decía al admin que la solicitud
+    // falló — en el modo que existe para que nada falle.
+    const impuestosEnPayload = payload[BLOQUES.impuestos] ?? [];
+    const descuentosEnPayload = payload[BLOQUES.descuentos] ?? [];
     console.warn(
       `[siesa] 🧪 SANDBOX — solicitud ${solicitudId ?? "?"} NO se importó. ` +
-        `${payload[BLOQUES.impuestos].length} impuesto(s), ` +
-        `${payload[BLOQUES.descuentos].length} descuento(s). Payload:\n` +
+        `${impuestosEnPayload.length} impuesto(s), ` +
+        `${descuentosEnPayload.length} descuento(s). Payload:\n` +
         JSON.stringify(payload, null, 2),
     );
     return { ok: true, sandbox: true, payload, respuesta: { sandbox: true } };

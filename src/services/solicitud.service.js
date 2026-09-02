@@ -5,6 +5,7 @@
    atada al contenido, y el empuje idempotente a SIESA.
    ============================================================================= */
 
+import { codigosDe, conCodigos } from "./codigosBarras.service.js";
 import { supabase } from "../config/supabase.js";
 import { createError, createErrorExpuesto } from "../middleware/errorHandler.js";
 import { costoNeto, evaluarPropuesta } from "./costoNeto.js";
@@ -735,7 +736,7 @@ export async function catalogoDe(cuenta) {
     programadasPorItem.get(p.claveItem).push(p);
   }
 
-  return vigentes.map((c) => ({
+  const conCostos = vigentes.map((c) => ({
     ...c,
     // Se manda calculado y no solo el precio: si el frontend lo recalculara por
     // su cuenta, tendríamos dos fórmulas del mismo número y un día no coinciden.
@@ -743,6 +744,17 @@ export async function catalogoDe(cuenta) {
     solicitudPendiente: porItem.get(c.claveItem) ?? null,
     programadas: programadasPorItem.get(c.claveItem) ?? [],
   }));
+
+  /* El código de barras es lo que el proveedor tiene A MANO: está impreso en la
+     caja que está mirando. El código SIESA (`1032`) y la descripción no están en
+     ningún lado del producto, así que buscar por ellos obliga a saber cómo lo
+     llama Merkahorro por dentro.
+
+     Va acá y no en `pp_cotizaciones` a propósito: el dato ya vive en
+     `siesa_codigos_barras` y duplicarlo en el snapshot crearía dos verdades que
+     se desincronizan. Se paga una consulta más por catálogo —que se pide una vez
+     al abrir la pantalla— y a cambio no hay nada que mantener sincronizado. */
+  return conCodigos(conCostos, await codigosDe(conCostos));
 }
 
 /** Nunca lanza: una auditoría que falla no puede tumbar la operación auditada. */

@@ -41,11 +41,32 @@ const BACKOFF_BASE_MS = 800;
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 const esDeadlock = (detalle) => /deadlock/i.test(String(detalle || ""));
 
+/**
+ * ¿El 500 viene de la CONSULTA mal escrita y no del motor bajo carga?
+ *
+ * Connekta devuelve 500 para las dos cosas, y son opuestas: un deadlock se
+ * arregla reintentando, un error de sintaxis no se arregla nunca.
+ *
+ * Pasó de verdad el 2026-09-01 con `merkahorro_terceros_dev_cotiz`, que se
+ * cargó con un `;` al final: *"Incorrect syntax near ';'"*. El bucle reintentó
+ * tres veces esperando 60,5 s cada una —tres minutos por página, dentro de un
+ * cron— y encima esos intentos cuentan contra el rate limit de SIESA. El error
+ * salía a los 250 ms; los tres minutos los pusimos nosotros.
+ */
+const esErrorDeConsulta = (detalle) =>
+  /incorrect syntax|error de sintaxis|invalid column|invalid object name|nombre de objeto no válido|must be declared/i.test(
+    String(detalle || ""),
+  );
+
 export function esReintentable(error) {
   const status = error?.response?.status;
   if (!status) return true; // timeout / socket cortado / DNS → transitorio
   if (status === 429) return true;
-  return status >= 500;
+  if (status < 500) return false;
+  // Un 500 que trae un error de SQL en el detalle es culpa de la consulta
+  // cargada en Connekta, no de la carga del motor. Reintentar es tiempo
+  // regalado y cupo de rate limit quemado por algo que no puede cambiar.
+  return !esErrorDeConsulta(error?.response?.data?.detalle);
 }
 
 /**
