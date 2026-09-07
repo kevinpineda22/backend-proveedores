@@ -30,7 +30,29 @@ const contar = async (tabla) => {
 /* ── 1. El backfill de la 006 ───────────────────────────────────────────────── */
 linea("\n── 006 · solicitudes agrupadas ──────────────────────────────────────");
 
-const viejas = await contar("pp_solicitudes_precio");
+/* La tabla vieja desaparece con la migración 008. Que no exista no es un error:
+   es el final feliz de esta verificación. Sin este `catch`, el script reventaría
+   justo cuando ya no hay nada que verificar.
+
+   ⚠️ Este camino puede tardar en activarse: vamos por PostgREST, que **cachea el
+   esquema**. El 2026-09-07, con la tabla ya borrada, esto siguió contando 0 filas
+   durante varias corridas en vez de fallar. Para saber de verdad si una tabla
+   existe, la fuente es SQL directo:
+
+     SELECT to_regclass('public.pp_solicitudes_precio');
+
+   y si el caché molesta: NOTIFY pgrst, 'reload schema'; */
+let viejas = null;
+try {
+  viejas = await contar("pp_solicitudes_precio");
+} catch {
+  console.log("  (pp_solicitudes_precio ya no existe: la migración 008 se corrió)");
+}
+
+if (viejas === null) {
+  const yaMigradas = await contar("pp_solicitud_lineas");
+  ok(`${yaMigradas} línea(s) en el esquema nuevo`);
+} else {
 const { count: migradas, error: eMig } = await supabase
   .from("pp_solicitud_lineas")
   .select("*", { count: "exact", head: true })
@@ -45,9 +67,17 @@ linea(`  líneas migradas:    ${migradas}`);
 linea(`  cabeceras nuevas:   ${cabeceras}`);
 linea(`  líneas totales:     ${lineas}`);
 
-viejas === migradas
-  ? ok("el backfill copió todas")
-  : mal(`FALTAN ${viejas - (migradas ?? 0)} — NO borrar la tabla vieja`);
+/* `viejas` es lo que QUEDA hoy en la tabla vieja; `migradas` es lo que ALGUNA VEZ
+   se copió. No tienen por qué coincidir: si alguien borra una fila de la vieja
+   —la limpieza de datos de prueba— los números se separan y no falta nada. Lo que
+   se comprueba abajo (fila por fila) es lo que de verdad importa. */
+if (viejas > (migradas ?? 0)) {
+  mal(`FALTAN ${viejas - (migradas ?? 0)} — NO borrar la tabla vieja`);
+} else if (viejas < (migradas ?? 0)) {
+  ok(`el backfill copió todas (${migradas - viejas} ya no está en la vieja)`);
+} else {
+  ok("el backfill copió todas");
+}
 
 /* El estado es lo único que no se puede perder en el camino: una solicitud que
    quedó 'pendiente' del lado nuevo cuando ya estaba 'aplicada' vuelve a la cola de
@@ -68,6 +98,7 @@ const desviados = (vs ?? []).filter((v) => {
 desviados.length === 0
   ? ok("estado y marca de empuje coinciden en todas")
   : mal(`${desviados.length} con estado/marca distintos: ${desviados.map((d) => d.id).join(", ")}`);
+}
 
 /* ── 2. Las sugerencias de la 007 ───────────────────────────────────────────── */
 linea("\n── 007 · sucursales hermanas ────────────────────────────────────────");

@@ -1,6 +1,6 @@
 # Portal de Proveedores — todo lo pendiente
 
-Actualizado el **2026-09-02**.
+Actualizado el **2026-09-07**.
 
 **Este archivo es la única fuente del ESTADO del proyecto**: qué falta, qué hay en
 la base y qué no hay que romper. Si un dato de estado aparece en otro documento y
@@ -20,7 +20,7 @@ Los otros no se pisan con este ni entre ellos:
 
 ## ⏳ LO QUE FALTA — leé solo esto para saber dónde estás
 
-**Todo cerrado menos una variable de entorno.**
+**De código no queda nada. Lo que queda es de otros, y una migración por correr.**
 
 - §1.1 consulta de terceros — ✅ cerrada el 2026-09-01
 - §1.2 ¿la solicitud #5 quedó escrita? — ✅ **QA CONFIRMÓ que sí** (2026-09-02)
@@ -29,11 +29,54 @@ Los otros no se pisan con este ni entre ellos:
 - §1.6 el múltiplo exacto entre presentaciones — ✅ medido: no nos afecta
 - §1.7 avisos de descuento eliminado — ✅ hechos, a pedido de QA
 - §1.8 código de barras en el buscador — ✅ hecho (99,6 % de cobertura)
+- §2.1 ¿más impuestos que ICO e IBU3? — ✅ cerrada el 2026-09-07: no hay más
+- §2.5 nombres de sucursal duplicados — ✅ cerrada el 2026-09-07 con `IdCia`
+- §2.6 ¿existe un descuento en orden 4? — ✅ cerrada el 2026-09-07: no existe
 - §4 datos de prueba — ✅ limpiados el 2026-09-02
-- §1.4 conector a producción — ⏳ **es lo único que queda: una variable**
+- §2.7 ¿cascada o suma con dos descuentos? — ✅ cerrada el 2026-09-07: **cascada**
+- Migración `008` — ✅ **corrida el 2026-09-07**: `pp_solicitudes_precio` ya no existe
+- §1.4 conector a producción — ⏳ una variable de entorno
+- §2.4 mirar en SIESA QA qué dejaron las pruebas del 06 — ⏳
+- §2.2 ¿el tope es por NIT o por sucursal? · §2.3 ¿y si el precio cambia en el
+  medio? — ⏳ **las dos únicas que quedan para compras**
+- **Grupos de sucursales hermanas (007)** — ⏳ 30 sugeridos, **0 activos**:
+  esperan que compras confirme cuáles replican precio
 
 ⚠️ **Antes de prender §1.4**, decidir qué pasa con las dos cuentas de prueba de
 Altipal, que siguen activas. Ver §4.
+
+⚠️ **Nada de esto está subido.** `git status` en los dos repos tiene trabajo sin
+commitear, incluida la feature de paquete del frontend entera. Vercel corre la
+rama subida: el portal desplegado NO tiene nada de lo del 2026-09-07. Ver §3.
+
+### 0. La migración `008` · ✅ **CORRIDA (2026-09-07)**
+
+`pp_solicitudes_precio`, la tabla previa a la 006, **ya no existe**. Verificado:
+`to_regclass('public.pp_solicitudes_precio')` devuelve `NULL`.
+
+Dejó dos cicatrices que vale anotar, porque las dos van a volver a morder:
+
+**1. El guard estaba mal escrito.** Comparaba `viejas = migradas`, que son dos
+cosas distintas: una es lo que QUEDA hoy en la tabla vieja, la otra es lo que
+ALGUNA VEZ se copió. Cuando la limpieza de datos de prueba borró la única
+solicitud vieja, los números se separaron —0 contra 1— y el bloque se negaba a
+borrar sin que faltara nada. Ahora exige `desviadas = 0`, que es la propiedad que
+de verdad protege: toda fila que todavía está en la vieja tiene su línea nueva,
+con el mismo estado y la misma marca de empuje.
+`scripts/verificar-006-007.js` tenía el mismo error de signo y quedó corregido.
+
+**2. No era idempotente.** La segunda corrida reventaba con
+`42P01 relation "pp_solicitudes_precio" does not exist` — PL/pgSQL compila el
+cuerpo recién al ejecutarlo— y ese error se lee como una falla cuando en realidad
+es el final feliz. Ahora arranca con `to_regclass(...) IS NULL → RETURN`. **Una
+migración que no se puede correr dos veces es una migración que nadie se anima a
+correr una.**
+
+⚠️ **PostgREST miente después de un DDL.** Con la tabla ya borrada,
+`verificar-006-007.js` la siguió reportando ("0 solicitudes") durante varias
+corridas: el cliente de Supabase va por PostgREST, que **cachea el esquema**. Para
+saber si una tabla existe, la fuente es SQL directo —`to_regclass`, `pg_tables`—,
+no el cliente. Si el caché molesta: `NOTIFY pgrst, 'reload schema';`
 
 ### 1. La ronda de pruebas que pidió QA · ✅ **MANDADA — falta que QA la mire**
 
@@ -90,12 +133,12 @@ propone y firma, el admin aprueba, y el precio se empuja al ERP.
 
 | | |
 |---|---|
-| Tests | **241** backend · **373** frontend, todos verdes |
-| Catálogo | 18.748 cotizaciones · **3.535 proveedores · 3.676 cuentas** |
-| Maestro | ✅ `merkahorro_terceros_dev_cotiz` — el de verdad, no el derivado |
+| Tests | **300** backend · **675** frontend, todos verdes (medido el 2026-09-07) |
+| Catálogo | 18.870 cotizaciones · **3.539 proveedores · 3.680 cuentas** |
+| Maestro | ✅ `merkahorro_terceros_dev_cotiz` — el de verdad, no el derivado, y deduplicado por `IdCia` |
 | Cuentas activas | 2 — Altipal 800186960: **006** (CATALOGO GENERAL) y **009** (BABARIA) |
 | Admins del portal | 1 |
-| Migraciones | `001` → `005`, todas corridas y verificadas contra la base |
+| Migraciones | `001` → `008`, todas corridas y verificadas contra la base |
 | Backend | `backend-proveedores.vercel.app`, escribiendo en **QA** |
 | Frontend | desplegado en `https://merkahorro.com/portal-proveedores` |
 | Entrada desde el sitio | Header → **Ingresar → Proveedores** |
@@ -684,14 +727,16 @@ los entornos cruzados la relectura es ciega.
 
 ## 2. PENDIENTE DE OTRA PERSONA
 
-### 2.1 · ¿Hay más llaves de impuesto además de ICO e IBU3?
+### 2.1 · ✅ **CERRADO (2026-09-07)** — solo existen ICO e IBU3
 
-Son las dos que aparecen en los datos. La documentación del conector decía
-"IBUA", que **no existe**. Vale confirmarlo con quien lleve la relación comercial, por si hay más que esta
-consulta no muestre.
+Confirmado por María José (compras/SIESA): **no hay más impuestos que esos dos.**
+Coincide con lo que muestran los datos. La documentación del conector decía
+"IBUA", que **no existe** — la llave real es `IBU3`.
 
-Ningún código hardcodea la llave —se lee del dato— pero si alguien escribe una
-lista de impuestos conocidos, que la copie de los datos y no del correo.
+Ningún código hardcodea la llave: se lee del dato, y así queda. Si mañana la ley
+agrega una, entra sola sin desplegar nada. Por eso el validador de
+`impuestosPropuestos` **no valida contra una lista cerrada**: un enum acá
+bloquearía el catálogo entero hasta que alguien toque el código.
 
 ### 2.2 · ¿El tope es por NIT o por sucursal?
 
@@ -726,10 +771,10 @@ Las tres de la 2092 son a propósito en **fechas distintas**: la fecha es parte 
 la llave, y en la misma fecha el segundo envío pisaría al primero — no se podría
 distinguir "nació sin ICO" de "el ICO quedó del envío anterior".
 
-### 2.5 · ⏳ Agregarle `f200_id_cia` a la consulta `merkahorro_terceros_dev_cotiz`
+### 2.5 · ✅ **CERRADO (2026-09-07)** — `IdCia` en las dos consultas
 
-La consulta devuelve el mismo `(NIT, sucursal)` **más de una vez con descripciones
-distintas**: 232 pares de 3.679, medido el 2026-09-06.
+La consulta devolvía el mismo `(NIT, sucursal)` **más de una vez con descripciones
+distintas**: 138 pares.
 
 ```
 900256457 | 001 → "COPA ZONA 2  RAMA"   y   "ZONA 2 DISTRIBUCIONES SAS"
@@ -739,27 +784,46 @@ distintas**: 232 pares de 3.679, medido el 2026-09-06.
 Sale del `INNER JOIN` contra `t202_mm_proveedores`, que empareja por `id_cia`: un
 tercero dado de alta en dos compañías del grupo aparece dos veces, y cada compañía
 le puso el nombre que quiso. Como la consulta **no puede llevar `ORDER BY`**
-(§1.1), el orden de llegada no está garantizado.
+(§1.1), el orden de llegada no estaba garantizado y el nombre cambiaba entre
+corridas del cron.
 
-Hay un paliativo en `mejorNombreSucursal()` — gana el nombre que no es la razón
-social, con desempate alfabético estable, 4 tests. **Pero adivina.** Con la
-columna `f200_id_cia` en el SELECT se puede quedar con la compañía donde viven los
-precios y no hay nada que adivinar.
+**Resuelto:** se agregó `IdCia` a `merkahorro_terceros_dev_cotiz` **y** a
+`merkahorro_cotizaciones_dev_2` (las dos, porque hay que cruzarlas).
+`derivarMaestro()` se queda con la fila de la compañía **donde viven los precios**,
+medida en cada corrida con `ciaDominante()` y no fijada a mano: un número quemado
+acertaría hoy y mentiría el día que muevan la operación de compañía.
 
-Mientras tanto, la detección de sucursales hermanas (migración 007) puede estar
-incompleta. Por eso su bloque `DO` es idempotente: cuando la columna esté, se
-vuelve a correr.
+Medido: **cia 1 con 18.869 de 18.870 cotizaciones**; **138 de 138** pares
+resueltos; 3.539 proveedores y 3.680 cuentas; cero nombres nulos.
 
-### 2.6 · ⏳ ¿Existe un descuento en orden 4? — la consulta SQL ya está escrita
+⚠️ **Se DEDUPLICA, no se filtra.** Filtrar el maestro a la cia 1 habría sacado
+**287 NIT**, y el maestro existe para poder invitar a proveedores que TODAVÍA no
+tienen precios cargados. `mejorNombreSucursal()` queda como red de seguridad para
+cuando el dato no puede decidir.
 
-Esto ya estaba anotado en `CONTRATO-SIESA.md §1bis.f` pero nadie lo llevó a
-SIESA, y es el que puede costar plata de los tres:
+Las copias de `docs/CONSULTA-TERCEROS.sql` y `docs/CONSULTA-COTIZACIONES.sql`
+están sincronizadas con lo que quedó cargado en Connekta.
 
-```sql
-SELECT f214_orden, COUNT(*) FROM dbo.t214_mm_cotizacion_dscto GROUP BY f214_orden;
-```
+### 2.6 · ✅ **CERRADO (2026-09-07)** — no existe ningún orden 4
 
-La consulta del portal lee los órdenes 1 a 3, y **23 renglones ya usan el 3** —el
+Medido sobre las **18.870 filas** del catálogo vigente con la columna
+`PorcDsctoOrden4` ya cargada en la consulta: **cero renglones** usan el orden 4.
+Los órdenes 1-3 cubren todo, y el costo neto que calcula el portal es completo.
+
+**Y de ahora en más se vigila solo.** Ésta es la parte que sobrevive a la
+respuesta: `ordenesDesconocidos()` mira los órdenes 4 al 9 en cada corrida del
+cron, y hasta hoy nunca encontraba nada **porque la consulta no traía esas
+columnas** — el detector estaba ciego. Con `Dscto4` en el SELECT, el día que un
+proveedor cargue uno, el snapshot lo grita en el log. La alarma tiene test
+(`un orden 4 CON valor se detecta`).
+
+⚠️ Si algún día salta, no alcanza con leerlo: hay que decidir **si va en cascada**
+(§2.7) y tocar también el gemelo del front (`utils/costoNeto.js`).
+
+<details>
+<summary>Cómo se resolvió, y por qué no se le pidió a nadie</summary>
+
+La consulta del portal lee los órdenes 1 a 3, y ya hay renglones usando el 3 —el
 techo—. `F214_ORDEN` admite hasta 9. Si aparece un orden 4:
 
 1. El costo neto sale **más alto** que el real → el tope se calcula mal y deja
@@ -767,17 +831,88 @@ techo—. `F214_ORDEN` admite hasta 9. Si aparece un orden 4:
 2. Al re-emitir, ese descuento **se pierde** — el mismo daño de §3 del contrato,
    pero causado por nosotros.
 
-Si el resultado no pasa de 3, quedamos como estamos.
+**No hace falta pedírselo a nadie.** Estaba anotado como "llevar esta consulta a
+SIESA", pero hay un camino más corto: **agregarle `Dscto4` a
+`merkahorro_cotizaciones_dev_2`**, que es una consulta que editamos nosotros.
 
-### 2.7 · ⏳ ¿Los descuentos por orden se componen en CASCADA o se SUMAN?
+Por qué así y no con una consulta nueva:
 
-El costo neto se calcula `precio × (1-d1) × (1-d2) × (1-d3)` (cascada, constante
-`MODO_DESCUENTO` en `src/services/costoNeto.js`). **Es un supuesto, no un dato
-confirmado.**
+- Una consulta dinámica nueva trae **su propio ConniKey/ConniToken** (§1.1), o
+  sea una variable de entorno más que mantener para una pregunta de una vez.
+- El detector **ya existe**: `ordenesDesconocidos()` mira `PorcDsctoOrden4..9` y
+  hoy nunca encuentra nada porque la consulta no trae esas columnas. Con la
+  columna puesta, el cron del snapshot **avisa solo**, y no una vez: para
+  siempre. Deja de ser una pregunta y pasa a ser una alarma.
+- El alcance es el correcto. La consulta trae vigentes y futuras — que son
+  exactamente las que leemos y re-emitimos. Un orden 4 en una cotización de 2023
+  ya muerta no nos afecta.
 
-Con un solo descuento da igual. Con dos o tres, no — y hoy son **76 renglones**
-(53 con dos descuentos, 23 con tres). Es una pregunta para compras, no para
-sistemas.
+El SQL con `Dscto4` está en `scripts/consultas/merkahorro_cotizaciones_dev_2.sql`
+y en la copia de `docs/CONSULTA-COTIZACIONES.sql`.
+
+</details>
+
+### 2.7 · ✅ **CERRADO (2026-09-07)** — es CASCADA, y lo dijo el propio ERP
+
+**No hizo falta preguntarle a nadie: ya estaba medido y nadie lo había cerrado.**
+Esta sección estuvo abierta pidiéndole a compras una respuesta que el ERP venía
+dando desde el 2026-08-27, en su propia pantalla.
+
+**La evidencia** — captura de la pantalla de ítems de SIESA, de los descuentos
+**por orden** (confirmado que es esa pantalla, no el descuento de pie de
+factura). JABON PROTEX, $9.524,15 × 5, órdenes de 4 % y 25 %:
+
+```
+9.524,15 × 5      = 47.620,75   bruto
+− 4 % (orden 1)   = 45.715,92   saldo
+25 % del SALDO    = 11.428,98   ← lo que MUESTRA SIESA ($11.429)
+25 % del bruto    = 11.905,19   ← no es lo que muestra
+```
+
+Cierra al peso con cascada y no cierra con aditiva. El ERP hace la cuenta solo:
+no es la palabra de nadie, es el dato. Está fijado como test.
+
+<details>
+<summary>La pregunta que se le iba a hacer a compras, y por qué se descartó</summary>
+
+**Con un producto real del catálogo:**
+
+> ACEITE GOURMET MULTIUSOS X 1800 ML (ítem 531). Precio **$33.038**, con dos
+> descuentos: **2,91 % y 12 %**.
+>
+> ¿Cuál de estos dos es lo que Merkahorro termina pagando?
+>
+> **A)** Uno sobre el otro → **$28.227,40**
+>   *(se descuenta 2,91 %, y sobre lo que queda se descuenta el 12 %)*
+>
+> **B)** Sumados → **$28.112,03**
+>   *(2,91 % + 12 % = 14,91 % de descuento sobre el precio)*
+>
+> Son **$115,37 de diferencia por unidad.**
+
+Se descartó porque la respuesta ya estaba: la captura de arriba la contesta con
+el ERP haciendo la cuenta, que es mejor evidencia que la memoria de una persona.
+Mandarla igual habría gastado el capital de preguntas que tenemos con compras
+—§2.2 y §2.3 siguen abiertas y esas SÍ las tiene que contestar una persona— en
+algo que el dato ya resolvía.
+
+**La lección, que es lo que sobrevive:** esta sección estuvo abierta días después
+de estar contestada, porque la confirmación se anotó en un comentario del código
+(`MODO_DESCUENTO`) y nunca bajó acá. Este archivo es la única fuente del ESTADO
+—lo dice su encabezado—: **si algo se confirma en el código, se cierra acá el
+mismo día**, o el proyecto sigue pidiendo cosas que ya tiene.
+
+</details>
+
+**Qué se habría roto si estuviera mal:** el costo neto es el número contra el que
+se evalúa el tope de aumento. Con el método equivocado, la marca de "supera el
+tope" sale —o deja de salir— cuando no corresponde. Alcance medido el 2026-09-07
+sobre el catálogo vigente: **20 renglones con dos o más descuentos**, 6 de ellos
+con tres. Con un solo descuento los dos métodos dan igual.
+
+⚠️ `MODO_DESCUENTO` vive en `src/services/costoNeto.js` **con un gemelo en
+`utils/costoNeto.js` del front**. Si algún día Merkahorro cambia de criterio, se
+cambian los dos. Los dos, o divergen.
 
 ---
 

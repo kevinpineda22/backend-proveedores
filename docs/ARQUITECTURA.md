@@ -259,7 +259,7 @@ Nomenclatura de este proyecto — prefijo `pp_` (Portal Proveedores):
 |---|---|
 | Rol del proveedor | `pp_proveedor` |
 | Rol del admin del portal | `pp_admin` |
-| Tablas Supabase | `pp_proveedores`, `pp_cuentas`, `pp_solicitudes_precio`, … |
+| Tablas Supabase | `pp_proveedores`, `pp_cuentas`, `pp_solicitudes`, `pp_solicitud_lineas`, … |
 | Prefijo CSS | `pp-` |
 | Carpeta frontend | `src/pages/PortalProveedores/` |
 | Rutas | `/portal-proveedores/*` |
@@ -357,34 +357,94 @@ pp_invitaciones
   token_hash            ← se guarda el HASH, nunca el token
   cuenta_id, expira_at, usado_at
 
-pp_solicitudes_precio   el corazón del sistema
+pp_solicitudes          el PAQUETE: una firma, muchos renglones (migración 006)
   id                    PK
-  cuenta_id             FK  ← de acá sale quién es el dueño. Del JWT, no del body
-  item_codigo, item_descripcion
-  unidad_medida         ← PARTE DE LA LLAVE en SIESA. No es un adorno
-  precio_actual         el que tenía SIESA al momento de solicitar
-  precio_propuesto
-  variacion_pct         calculada en el servidor
-  porcentaje_max_vigente snapshot del tope que regía ← auditoría
-  fecha_activacion      DATE
-  impuestos_vigentes    JSONB  ← snapshot [{llave:'ICO', valor:1200}, ...]
-  descuentos_vigentes   JSONB  ← snapshot [{orden:1, pct:5, valor:0}, ...]
-  estado                'pendiente'|'aprobada'|'rechazada'|'aplicada'|'fallida'
-  motivo_rechazo
-  firma_id              FK → pp_firmas  (NOT NULL para salir de 'pendiente')
-  siesa_aplicado_at     ← ancla de idempotencia. Ver §7
-  creado_at, resuelto_at, resuelto_por
+  cuenta_id             FK → pp_cuentas  ← quién es el dueño. Del JWT, no del body
+  firma_id              FK → pp_firmas   NOT NULL — no hay paquete sin firma
+  creado_at, updated_at
 
-  UNIQUE (cuenta_id, item_codigo, unidad_medida) WHERE estado = 'pendiente'
+pp_solicitud_lineas     el corazón del sistema: un renglón propuesto
+  id                    PK
+  solicitud_id          FK → pp_solicitudes  ON DELETE CASCADE
+  cuenta_destino_id     FK → pp_cuentas  ← DÓNDE ATERRIZA en SIESA
+  origen                'proveedor' | réplica automática
+  replica_de_id         FK → pp_solicitud_lineas  (la línea que la originó)
+
+  clave_item            identidad del renglón tal como la espera el conector
+  item, descripcion_item
+  unidad_medida         ← PARTE DE LA LLAVE en SIESA. No es un adorno
+
+  precio_actual         el que tenía SIESA al momento de proponer
+  descuentos_actuales   JSONB  ← snapshot [{orden:1, pct:5, valor:0}, ...]
+  impuestos_vigentes    JSONB  ← snapshot [{llave:'ICO', valor:1200}, ...]
+  costo_neto_actual     ← contra esto se mide el tope, NO contra el precio
+
+  precio_propuesto
+  descuentos_propuestos JSONB
+  impuestos_propuestos  JSONB
+  costo_neto_propuesto
+  variacion_pct          calculada en el servidor
+  porcentaje_max_vigente snapshot del tope que regía ← auditoría
+
+  fecha_activacion      DATE
+  estado                'pendiente'|'aprobada'|'rechazada'|'aplicada'|'fallida'
+  motivo_rechazo, resuelto_at, resuelto_por
+  siesa_aplicado_at     ← ancla de idempotencia. Ver §7
+  siesa_payload, siesa_respuesta, siesa_verificacion
+  migrada_de_id         ← rastro de la tabla previa. Ver abajo
+  creado_at, updated_at
+
+  UNIQUE (cuenta_destino_id, clave_item) WHERE estado = 'pendiente'
 ```
+
+> **Por qué se partió en dos (migración 006).**
+>
+> Antes había UNA tabla, `pp_solicitudes_precio`, con un renglón por propuesta y
+> su firma adentro. El proveedor que quería mover 30 precios firmaba 30 veces.
+> La firma es un hecho legal: lo que se firma es **el paquete**, una vez, y por
+> eso la firma vive en la cabecera y los renglones cuelgan de ella.
+>
+> Todo lo que se resuelve —aprobar, rechazar, reintentar— opera sobre **líneas**,
+> no sobre paquetes: por eso las rutas son `/solicitudes/lineas/...`. Aprobar el
+> paquete entero es mandar todas sus líneas; un lote puede tocar líneas de
+> paquetes distintos.
+>
+> **La llave única se mueve a `cuenta_destino_id`, no a `cuenta_id`.** Una línea
+> puede aterrizar en una sucursal distinta a la que firmó (ver la réplica, abajo),
+> y lo que no puede haber dos veces pendiente es un ítem **en su destino**.
+>
+> `pp_solicitudes_precio` se conservó un tiempo para verificar el backfill contra
+> producción y **se borró con la migración `008` el 2026-09-07**. `migrada_de_id`
+> queda como único rastro de qué línea vino de ella.
+
+> **La réplica a sucursales hermanas (`origen` / `replica_de_id`).**
+>
+> Un mismo NIT puede tener la sucursal de Copacabana y la del resto — "COPA ZONA 2
+> RAMA" y "ZONA 2 RAMA" son el mismo acuerdo partido por zona de entrega. La
+> propuesta se replica a la hermana automáticamente y **en silencio para el
+> proveedor**: el reparto por sede es interno de Merkahorro.
+>
+> Silencio para el proveedor, **no para compras**. El admin sí ve la línea
+> replicada, y tiene que verla: medido el 2026-09-06 sobre 521 renglones
+> comparados entre hermanas, **16 ya tienen precio distinto hoy** (ZONA 2 NIVEA:
+> $17.260 contra $17.290). Replicar sin que nadie mire pisa una diferencia que
+> alguien puso a propósito.
+>
+> El silencio lo hace la **base**, con una política de RLS — no el cuidado de
+> quien escribe la consulta.
+>
+> Los grupos de hermanas viven en `pp_grupos_sucursal` + `pp_grupo_sucursales`
+> (migración `007`) y nacen **`activo = false`**: nada se replica hasta que
+> compras confirme el grupo. Al 2026-09-07 hay **30 sugeridos y 0 activos**.
 
 > **Por qué `unidad_medida` y los dos snapshots JSONB.**
 >
 > La llave de una cotización en SIESA es
 > `(nit, sucursal, moneda, item, fecha_activacion, unidad_medida)`. Un ítem NO
-> tiene un precio: tiene un precio **por unidad de medida**. Guardar solo
-> `item_codigo` haría que dos renglones del mismo ítem en unidades distintas se
-> pisen. Es el mismo problema multi-UM de Traslados.
+> tiene un precio: tiene un precio **por unidad de medida**. Guardar solo el
+> `item` haría que dos renglones del mismo ítem en unidades distintas se pisen —
+> por eso `unidad_medida` viaja dentro de `clave_item`, que es lo que lleva el
+> índice único de pendientes. Es el mismo problema multi-UM de Traslados.
 >
 > Los snapshots de impuestos y descuentos existen porque la fecha también está en
 > la llave: al crear la cotización con fecha nueva hay que **re-emitir** los

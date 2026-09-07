@@ -94,12 +94,14 @@ test("normalizarTercero recorta el relleno de los CHAR de SQL Server", () => {
     RazonSocial: "DISTRIBUIDORA EJEMPLO SAS ",
     Sucursal: "006",
     DescSucursal: " CATALOGO GENERAL ",
+    IdCia: " 1 ",
   });
   assert.deepEqual(fila, {
     idTercero: "901150440",
     nit: "901150440",
     razonSocial: "DISTRIBUIDORA EJEMPLO SAS",
     sucursal: "006",
+    idCia: "1",
     nombreSucursal: "CATALOGO GENERAL",
   });
 });
@@ -203,4 +205,77 @@ test("un duplicado no crea una cuenta de más", () => {
 
   assert.equal(cuentas.length, 1);
   assert.equal(cuentas[0].nombre_sucursal, "EPS SURAMERICANA SA");
+});
+
+/* ── Desempate por COMPAÑÍA (2026-09-07) ──────────────────────────────────────
+   La consulta ahora trae `IdCia`. Gana la fila de la compañía donde viven los
+   precios: es el nombre que compras reconoce, porque es el de la operación real.
+   Medido: resuelve los 138 pares ambiguos, los 138, sin perder proveedores.
+   ────────────────────────────────────────────────────────────────────────────── */
+
+const conCia = (nit, sucursal, cia, desc, razon = "ZONA 2 DISTRIBUCIONES SAS") => ({
+  IdTercero: nit,
+  NitTercero: nit,
+  RazonSocial: razon,
+  Sucursal: sucursal,
+  DescSucursal: desc,
+  IdCia: cia,
+});
+
+test("gana el nombre de la compañía que tiene los precios", () => {
+  // Caso real: ZONA 2, sucursal 001. La cia 1 es la de la operación.
+  const crudas = [
+    conCia("900256457", "001", "2", "ZONA 2 DISTRIBUCIONES SAS"),
+    conCia("900256457", "001", "1", "COPA ZONA 2 RAMA"),
+  ];
+  const { cuentas } = derivarMaestro(crudas.map(normalizarTercero), "1");
+
+  assert.equal(cuentas.length, 1);
+  assert.equal(cuentas[0].nombre_sucursal, "COPA ZONA 2 RAMA");
+});
+
+test("y gana igual si la otra compañía llega PRIMERO", () => {
+  // Sin ORDER BY el orden de llegada es el que sea. Si el resultado dependiera
+  // de él, el nombre cambiaría entre corridas del cron — que es el bug original.
+  const a = conCia("900256457", "001", "1", "COPA ZONA 2 RAMA");
+  const b = conCia("900256457", "001", "2", "ZONA 2 DISTRIBUCIONES SAS");
+
+  for (const orden of [[a, b], [b, a]]) {
+    const { cuentas } = derivarMaestro(orden.map(normalizarTercero), "1");
+    assert.equal(cuentas[0].nombre_sucursal, "COPA ZONA 2 RAMA");
+  }
+});
+
+test("sin IdCia cae al desempate por nombre, y no revienta", () => {
+  // Si alguien saca la columna de la consulta, esto degrada — no falla.
+  const crudas = [
+    conCia("900256457", "001", "", "ZONA 2 DISTRIBUCIONES SAS"),
+    conCia("900256457", "001", "", "COPA ZONA 2 RAMA"),
+  ];
+  const { cuentas } = derivarMaestro(crudas.map(normalizarTercero), null);
+
+  assert.equal(cuentas.length, 1);
+  assert.equal(cuentas[0].nombre_sucursal, "COPA ZONA 2 RAMA", "gana el que no es la razón social");
+});
+
+test("NO se pierde ningún proveedor: deduplica, no filtra", () => {
+  // Filtrar por la cia con precios habría borrado 287 NIT del maestro, y el
+  // maestro existe justamente para invitar a proveedores que TODAVÍA no tienen
+  // precios cargados.
+  const crudas = [
+    conCia("900256457", "001", "1", "COPA ZONA 2 RAMA"),
+    conCia("111111111", "001", "2", "SOLO EN LA OTRA CIA", "OTRO PROVEEDOR"),
+  ];
+  const { proveedores, cuentas } = derivarMaestro(crudas.map(normalizarTercero), "1");
+
+  assert.equal(proveedores.length, 2, "el de la cia 2 sigue estando");
+  assert.equal(cuentas.length, 2);
+  assert.ok(cuentas.some((c) => c.nombre_sucursal === "SOLO EN LA OTRA CIA"));
+});
+
+test("las cuentas NO llevan la cia: no es columna de pp_cuentas", () => {
+  // `_cia` es andamiaje interno. Si se colara, el upsert lo rechazaría y el
+  // maestro dejaría de sincronizar entero.
+  const { cuentas } = derivarMaestro([normalizarTercero(conCia("900256457", "001", "1", "X"))], "1");
+  assert.deepEqual(Object.keys(cuentas[0]).sort(), ["nit", "nombre_sucursal", "sucursal"]);
 });

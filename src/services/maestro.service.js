@@ -27,6 +27,7 @@
 
 import { supabase } from "../config/supabase.js";
 import { consultaTerceros, consultarTerceros } from "../config/connekta.js";
+import { ciaDominante } from "./normalizarCotizacion.js";
 
 /**
  * Extrae proveedores y sucursales únicos de cotizaciones YA NORMALIZADAS.
@@ -56,39 +57,41 @@ export function normalizarTercero(cruda) {
     razonSocial: t(cruda?.RazonSocial),
     sucursal: t(cruda?.Sucursal),
     nombreSucursal: t(cruda?.DescSucursal),
+    // Agregada a la consulta el 2026-09-07. Es lo que resuelve los nombres
+    // duplicados de sucursal, ver `derivarMaestro`.
+    idCia: t(cruda?.IdCia),
   };
 }
 
 /**
  * ¿Cuál de dos nombres describe mejor a la MISMA sucursal?
  *
- * Hace falta porque la consulta de terceros devuelve el mismo `(nit, sucursal)`
- * más de una vez con descripciones distintas — medido el 2026-09-06: **232 pares
- * duplicados de 3.679**. Vienen del `INNER JOIN` contra `t202_mm_proveedores`,
- * que empareja por `id_cia`: un tercero dado de alta en dos compañías del grupo
- * aparece dos veces, y cada compañía le puso el nombre que quiso.
+ * ⚠️ RED DE SEGURIDAD, YA NO EL CAMINO PRINCIPAL.
+ *
+ * El problema: la consulta de terceros devuelve el mismo `(nit, sucursal)` más de
+ * una vez con descripciones distintas, porque el `INNER JOIN` contra
+ * `t202_mm_proveedores` empareja por compañía y un tercero dado de alta en dos
+ * compañías del grupo aparece dos veces:
  *
  *     900256457 | 001 → "COPA ZONA 2  RAMA"  y  "ZONA 2 DISTRIBUCIONES SAS"
  *     800088702 | 001 → "EPS SURA"           y  "EPS SURAMERICANA SA"
  *
- * Antes ganaba el primero que llegaba. Y como la consulta **no puede llevar
- * `ORDER BY`** (Connekta la envuelve para paginar y SQL Server lo prohíbe ahí),
- * el orden no está garantizado: el nombre de una sucursal podía cambiar de una
- * corrida del cron a la siguiente, sin que nadie tocara nada.
+ * Ganaba el primero que llegaba, y como la consulta **no puede llevar `ORDER BY`**
+ * el orden no está garantizado: el nombre cambiaba de una corrida del cron a la
+ * siguiente sin que nadie tocara nada.
  *
- * El criterio: gana el nombre que NO es la razón social. Cuando una compañía no
- * le puso nombre propio a la sucursal, SIESA repite el de la empresa — que es el
- * dato genérico. El otro es el que distingue la sucursal, y es justamente el que
- * necesita la detección de sucursales hermanas (migración 007): sin él,
- * "COPA ZONA 2 RAMA" desaparece y el par no se detecta nunca.
+ * **Resuelto de fondo el 2026-09-07**: la consulta ahora trae `IdCia` y
+ * `derivarMaestro` se queda con la fila de la compañía donde viven los PRECIOS.
+ * Eso resolvió los 138 pares ambiguos, los 138, sin perder ni un proveedor.
  *
- * Si los dos difieren de la razón social —o los dos coinciden— desempata el orden
- * alfabético. Es arbitrario, pero es ESTABLE, que es lo único que se le pide a un
- * desempate.
+ * Esta función queda para el caso que el dato no puede decidir: dos filas de la
+ * MISMA compañía, o una corrida sin `IdCia`. El criterio es que gana el nombre que
+ * NO es la razón social —cuando una compañía no le puso nombre propio a la
+ * sucursal, SIESA repite el de la empresa, que es el genérico— y desempata el
+ * orden alfabético. Arbitrario, pero ESTABLE, que es lo único que se le pide.
  *
- * ⚠️ ARREGLO DE FONDO, PENDIENTE DE SIESA: agregarle `f200_id_cia` a
- * `merkahorro_terceros_dev_cotiz` y quedarse con la compañía donde viven los
- * precios. Ahí no hay que adivinar nada. Esto es el paliativo mientras tanto.
+ * No se borra porque un empate silencioso que elige al azar es exactamente el bug
+ * que esto vino a cerrar.
  */
 export function mejorNombreSucursal(a, b, razonSocial) {
   if (!a) return b;
@@ -103,9 +106,14 @@ export function mejorNombreSucursal(a, b, razonSocial) {
   return a <= b ? a : b;
 }
 
-export function derivarMaestro(filas = []) {
+/**
+ * @param {Array} filas             salida de `normalizarTercero`
+ * @param {string|null} ciaConPrecios  la compañía donde viven las cotizaciones
+ */
+export function derivarMaestro(filas = [], ciaConPrecios = null) {
   const proveedores = new Map();
   const cuentas = new Map();
+  const cia = String(ciaConPrecios ?? "").trim();
 
   for (const f of filas) {
     const nit = String(f?.nit ?? "").trim();
@@ -122,21 +130,38 @@ export function derivarMaestro(filas = []) {
 
     const clave = `${nit}|${sucursal}`;
     const nombre = String(f.nombreSucursal ?? "").trim() || null;
+    const suCia = String(f.idCia ?? "").trim();
 
-    if (!cuentas.has(clave)) {
-      cuentas.set(clave, { nit, sucursal, nombre_sucursal: nombre });
-    } else {
-      // Duplicado: elegir, no quedarse con el que llegó primero.
-      const ya = cuentas.get(clave);
-      ya.nombre_sucursal = mejorNombreSucursal(
-        ya.nombre_sucursal,
-        nombre,
-        proveedores.get(nit)?.razon_social,
-      );
+    const ya = cuentas.get(clave);
+    if (!ya) {
+      cuentas.set(clave, { nit, sucursal, nombre_sucursal: nombre, _cia: suCia });
+      continue;
     }
+
+    /* DUPLICADO. Gana la fila de la compañía donde están los PRECIOS.
+       Es el nombre que compras reconoce, porque es el de la operación real.
+       Medido el 2026-09-07: resuelve los 138 pares ambiguos, los 138. */
+    if (cia && suCia === cia && ya._cia !== cia) {
+      cuentas.set(clave, { nit, sucursal, nombre_sucursal: nombre, _cia: suCia });
+      continue;
+    }
+    if (cia && ya._cia === cia && suCia !== cia) continue; // el que está ya es el bueno
+
+    /* Las dos filas son de la misma compañía —o no sabemos cuál tiene precios—.
+       Ahí no hay dato que decida y se cae al desempate por nombre, que al menos
+       es ESTABLE. No debería pasar: se deja porque un empate silencioso que
+       elige al azar es exactamente el bug que esto vino a cerrar. */
+    ya.nombre_sucursal = mejorNombreSucursal(
+      ya.nombre_sucursal,
+      nombre,
+      proveedores.get(nit)?.razon_social,
+    );
   }
 
-  return { proveedores: [...proveedores.values()], cuentas: [...cuentas.values()] };
+  // `_cia` es andamiaje: no es una columna de `pp_cuentas` y el upsert la
+  // rechazaría.
+  const limpias = [...cuentas.values()].map(({ _cia, ...c }) => c);
+  return { proveedores: [...proveedores.values()], cuentas: limpias };
 }
 
 /** Parte un arreglo en lotes. */
@@ -184,7 +209,22 @@ const PERDIDA_TOLERADA = Number(process.env.PROVEEDORES_MAESTRO_PERDIDA_TOLERADA
 export async function sincronizarMaestro(cotizaciones = []) {
   const inicio = Date.now();
   const { filas, fuente } = await leerFuente(cotizaciones);
-  const { proveedores, cuentas } = derivarMaestro(filas);
+
+  /* En qué compañía de SIESA viven los precios. Se MIDE sobre las cotizaciones
+     de esta misma corrida —no se fija a mano— y es lo que desempata los nombres
+     de sucursal duplicados. Ver `derivarMaestro`. */
+  const cia = ciaDominante(cotizaciones);
+  if (!cia) {
+    /* Sin cia no se rompe nada: se cae al desempate por nombre, que es estable
+       aunque adivine. Pero se avisa, porque significa que la consulta dejó de
+       traer `IdCia` — y el síntoma silencioso sería nombres cambiando solos. */
+    console.warn(
+      "[maestro] las cotizaciones no traen IdCia: los nombres de sucursal " +
+        "duplicados se resuelven por heurística. ¿Se cambió la consulta?",
+    );
+  }
+
+  const { proveedores, cuentas } = derivarMaestro(filas, cia);
 
   /*
    * GUARDA DEL FILTRO. El maestro NO borra a nadie —el upsert usa

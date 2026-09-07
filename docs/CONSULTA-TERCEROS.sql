@@ -82,6 +82,45 @@
    que el join lo trae. No es un error y no rompe nada —el maestro no invita a
    nadie solo— pero es un tercero al que no le vas a habilitar acceso al portal.
 
+   ── : por qué está y qué arregla (2026-09-07) ──────────────────────
+
+   Esta consulta devolvía el mismo (NIT, sucursal) MÁS DE UNA VEZ con nombres
+   distintos —138 pares—, porque el INNER JOIN empareja por compañía y un tercero
+   dado de alta en dos compañías del grupo aparece dos veces:
+
+       900256457 | 001 → "COPA ZONA 2 RAMA"  y  "ZONA 2 DISTRIBUCIONES SAS"
+
+   Ganaba el que llegara primero, y sin ORDER BY el orden no está garantizado: el
+   nombre de una sucursal cambiaba entre corridas del cron.
+
+   Con ,  se queda con la fila de la compañía donde
+   viven los PRECIOS (medido: la 1, con 18.869 de 18.870 cotizaciones). Resolvió
+   los 138 pares, los 138.
+
+   ⚠️ NO se filtra por esa compañía, se DEDUPLICA. Filtrar habría sacado 287 NIT
+   del maestro — y el maestro existe para poder invitar a proveedores que TODAVÍA
+   no tienen precios cargados.
+
+   ── `IdCia`: por qué está y qué arregla (2026-09-07) ────────────────────────
+
+   Esta consulta devolvía el mismo (NIT, sucursal) MÁS DE UNA VEZ con nombres
+   distintos —138 pares—, porque el INNER JOIN empareja por compañía y un tercero
+   dado de alta en dos compañías del grupo aparece dos veces:
+
+       900256457 | 001 → "COPA ZONA 2 RAMA"  y  "ZONA 2 DISTRIBUCIONES SAS"
+
+   Ganaba el que llegara primero, y sin ORDER BY el orden no está garantizado: el
+   nombre de una sucursal cambiaba entre corridas del cron sin que nadie tocara
+   nada.
+
+   Con `IdCia`, `derivarMaestro()` se queda con la fila de la compañía donde viven
+   los PRECIOS —medido: la 1, con 18.869 de 18.870 cotizaciones—. Resolvió los
+   138 pares, los 138.
+
+   ⚠️ NO se filtra por esa compañía, se DEDUPLICA. Filtrar habría sacado 287 NIT
+   del maestro, y el maestro existe justamente para poder invitar a proveedores
+   que TODAVÍA no tienen precios cargados.
+
    Pendiente de SIESA, no bloqueante: el CORREO del proveedor y su ESTADO
    activo/inactivo. Hoy el correo se carga a mano, uno por uno.
    ============================================================================= */
@@ -89,16 +128,14 @@
 SELECT
     t200.f200_id                    AS IdTercero,
     t200.f200_nit                   AS NitTercero,
+    t200.f200_id_cia                AS IdCia,
     t200.f200_razon_social          AS RazonSocial,
     'PROVEEDOR'                     AS TipoTercero,
     t202.f202_id_sucursal           AS Sucursal,
     t202.f202_descripcion_sucursal  AS DescSucursal
-
 FROM dbo.t200_mm_terceros AS t200
-
 INNER JOIN dbo.t202_mm_proveedores AS t202
-        ON t202.f202_rowid_tercero = t200.f200_rowid
-       AND t202.f202_id_cia        = t200.f200_id_cia
-
+    ON t202.f202_rowid_tercero = t200.f200_rowid
+   AND t202.f202_id_cia        = t200.f200_id_cia
 WHERE t200.f200_nit IS NOT NULL
   AND t202.f202_id_sucursal IS NOT NULL

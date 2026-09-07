@@ -9,7 +9,7 @@
    QUÉ HACE
      1. Crea una solicitud de DOS productos sobre la cuenta de prueba (ALTIPAL).
      2. Comprueba que la firma del paquete verifique.
-     3. La ANULA — y por eso es seguro: no deja nada pendiente ni toca SIESA.
+     3. La ANULA y la BORRA — por eso es seguro: no deja rastro ni toca SIESA.
 
    NO toca SIESA. `crearSolicitud` no empuja nada: eso es `aprobarLineas`.
 
@@ -167,6 +167,13 @@ if (DEJAR) {
 } else {
   const a = await anular({ solicitudId: r.id, cuenta, userId: null, ip: null });
   a.estado === "anulada" ? ok(`solicitud ${r.id} anulada (${a.lineas} línea/s)`) : mal("no se anuló");
+
+  /* Y se BORRA. Anular deja la solicitud en la base: a las diez corridas, la
+     pantalla del proveedor es una lista de basura de pruebas y la bandeja del
+     admin también. La firma y la auditoría quedan —son append-only y el hecho
+     ocurrió—, pero la solicitud no tiene por qué. */
+  const { error: errDel } = await supabase.from("pp_solicitudes").delete().eq("id", r.id);
+  errDel ? mal(`no se pudo borrar: ${errDel.message}`) : ok("y borrada: no queda rastro en la bandeja");
 }
 
 console.log(process.exitCode ? "\n❌ Hay fallos arriba.\n" : "\n✅ Todo bien.\n");

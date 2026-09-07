@@ -146,6 +146,12 @@ export function normalizarFila(cruda) {
       razonSocial: trim(cruda?.RazonSocial),
       sucursal,
       nombreSucursal: trim(cruda?.DescSucursal),
+      /* La compañía de SIESA. NO se guarda en `pp_cotizaciones` —`filasParaUpsert`
+         mapea campo por campo y no la incluye— y no entra en ninguna llave: se usa
+         solo, en memoria, para saber en qué compañía viven los precios y con eso
+         desempatar los nombres de sucursal del maestro (ver maestro.service.js).
+         Agregada el 2026-09-07 junto con la columna `IdCia` de la consulta. */
+      idCia: trim(cruda?.IdCia),
       // La consulta vieja no trae la columna; sin dato se asume COP y la llave
       // queda idéntica a la que ya está guardada. Ver el comentario de MONEDA.
       moneda: trim(cruda?.Moneda) || MONEDA,
@@ -252,3 +258,26 @@ export function separarVigentes(cotizaciones = [], hoy = hoyEnColombia()) {
 /** Porcentajes de descuento listos para `costoNeto()`. */
 export const porcentajesDescuento = (cotizacion) =>
   (cotizacion?.descuentos ?? []).map((d) => d.porcentaje);
+
+/**
+ * En qué compañía de SIESA viven los precios.
+ *
+ * Se MIDE sobre las cotizaciones de la corrida, no se fija en una constante.
+ * Medido el 2026-09-07: de 18.870 filas, **18.869 son de la compañía 1** y una
+ * sola es de la 2 (COMERCIALIZADORA DIA SAS, ítem 44181). Un número puesto a
+ * mano acertaría hoy y quedaría mintiendo el día que Merkahorro mueva la
+ * operación de compañía — y el síntoma sería nombres de sucursal cambiando
+ * solos, que es justo lo que esto viene a arreglar.
+ *
+ * Devuelve `null` con una lista vacía: quien llama tiene que poder distinguir
+ * "no hay dato" de "es la compañía tal", y no caer a un default silencioso.
+ */
+export function ciaDominante(cotizaciones = []) {
+  const cuenta = new Map();
+  for (const c of cotizaciones) {
+    const cia = String(c?.idCia ?? "").trim();
+    if (cia) cuenta.set(cia, (cuenta.get(cia) ?? 0) + 1);
+  }
+  if (!cuenta.size) return null;
+  return [...cuenta].sort((a, b) => b[1] - a[1])[0][0];
+}

@@ -141,7 +141,8 @@ export const ESTADOS_NOTIFICABLES = new Set(["aplicada", "rechazada"]);
  * NO LANZA NUNCA. Devuelve qué pasó, para que el llamador lo registre.
  *
  * @param {object} args
- * @param {object} args.solicitud  Fila de `pp_solicitudes_precio`.
+ * @param {object} args.solicitud  Una línea, en la forma de columnas que arma
+ *                                 `aFilaDeAviso()` en solicitud.service.js.
  * @param {string} args.correo     `pp_cuentas.correo_notificacion`.
  * @param {string} args.estado     Estado FINAL de la solicitud.
  * @returns {Promise<{enviado: boolean, motivo?: string}>}

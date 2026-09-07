@@ -325,7 +325,9 @@ src/
     invitacion.service.js   token de un solo uso, 72 h
     email.service.js        SMTP con modo prueba
   controllers/  routes/  server.js
-sql/            001_create_tables · 002_moneda · 003_admins
+sql/            001_create_tables · 002_moneda · 003_admins · 004_verificacion
+                005_anulada · 006_solicitudes_agrupadas · 007_grupos_sucursal
+                008_drop_solicitudes_precio
 ```
 
 ### Frontend — `Pagina-web_React/src/pages/PortalProveedores/`
@@ -338,11 +340,24 @@ AdminPanel.jsx         tres pestañas: maestro, novedades y administradores
 components/
   AdminsPortal.jsx         quién puede aprobar precios
   PerfilProveedor.jsx      asociar correo, poner el tope, invitar
-  EditarPrecioModal.jsx    propuesta + costo neto en vivo + firma
+  FilaCotizacion.jsx       propuesta + costo neto en vivo, EN LA FILA
+  DescuentoMasivo.jsx      el mismo descuento sobre varios renglones
+  BarraPaquete.jsx         qué llevo armado, siempre a la vista
+  FirmarPaquete.jsx        una firma para todo el paquete
   BandejaAprobaciones.jsx  aprobar / rechazar
-hooks/     useMaestro · useCatalogo · useAprobaciones · useAdmins
-utils/     costoNeto · emailSintetico · fechas   (los tres con test)
+hooks/     useMaestro · useCatalogo · useAprobaciones · useAdmins · useBorrador
+utils/     costoNeto · emailSintetico · fechas · borrador · bandeja ·
+           buscarCatalogo · cambiosDescuentos · exportarBandeja ·
+           paginacion · resumenProveedor        (todos con test)
 ```
+
+> **`EditarPrecioModal` ya no existe** (2026-09-06). El modal tapaba la tabla
+> justo cuando el proveedor necesitaba comparar contra los otros renglones, y
+> obligaba a firmar de a uno. Se reemplazó por `FilaCotizacion` —editar donde
+> está el dato— más `BarraPaquete` y `FirmarPaquete`, que separan **armar** de
+> **firmar**.
+>
+> `sql/` va de `001` a `008`. La `008` borró `pp_solicitudes_precio`.
 
 ### Las tablas
 
@@ -352,10 +367,24 @@ utils/     costoNeto · emailSintetico · fechas   (los tres con test)
 | `pp_cuentas` | Una fila por sucursal. El correo real y el estado |
 | `pp_cotizaciones` | El catálogo, refrescado por el cron |
 | `pp_invitaciones` | El **hash** del token, vencimiento, uso |
-| `pp_solicitudes_precio` | El corazón: la propuesta y sus snapshots |
+| `pp_solicitudes` | El **paquete**: una firma para muchos renglones |
+| `pp_solicitud_lineas` | El corazón: cada renglón propuesto y sus snapshots |
+| `pp_grupos_sucursal` · `pp_grupo_sucursales` | Sucursales hermanas. Nacen `activo = false` |
 | `pp_firmas` | **APPEND-ONLY por trigger.** Sin UPDATE, sin DELETE |
 | `pp_auditoria` | **APPEND-ONLY por trigger.** Quién hizo qué |
 | `pp_admins` | Quién es admin del portal |
+
+> **Se firma el PAQUETE, no el renglón** (migración `006`). Antes había una sola
+> tabla, `pp_solicitudes_precio`, y mover 30 precios eran 30 firmas. La firma es un
+> hecho legal: se firma una vez, en la cabecera, y las líneas cuelgan de ahí.
+>
+> Pero todo lo que **resuelve** opera sobre líneas, no sobre paquetes — por eso las
+> rutas del admin son `/solicitudes/lineas/aprobar|rechazar|reintentar`. Aprobar el
+> paquete entero es mandar todas sus líneas, y un lote puede tocar líneas de
+> paquetes distintos.
+>
+> `pp_solicitudes_precio` **ya no existe**: se borró con la migración `008` el
+> 2026-09-07, después de verificar el backfill contra producción.
 
 ---
 

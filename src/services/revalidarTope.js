@@ -35,7 +35,7 @@ const distintos = (a, b, tolerancia = 0.01) => {
 /**
  * Recalcula la propuesta contra el precio vigente HOY.
  *
- * @param {object} solicitud  Fila de `pp_solicitudes_precio` (la congelada).
+ * @param {object} solicitud  Fila de `pp_solicitud_lineas` (la congelada).
  * @param {object|null} vigenteHoy  Salida de `vigenteDe()`, o `null` si el ítem
  *   ya no está en el catálogo.
  * @returns {{
