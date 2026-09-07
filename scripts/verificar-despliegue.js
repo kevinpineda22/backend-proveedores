@@ -19,9 +19,32 @@
    ============================================================================= */
 
 import axios from "axios";
+import fs from "node:fs";
+import { execSync } from "node:child_process";
 
 const BASE = (process.argv[2] || "https://backend-proveedores.vercel.app").replace(/\/+$/, "");
 const API = `${BASE}/api`;
+
+/** Lee un archivo del repo. Devuelve "" si el script se corre desde otra carpeta. */
+const fsLeer = (ruta) => {
+  try {
+    return fs.readFileSync(ruta, "utf8");
+  } catch {
+    return "";
+  }
+};
+
+/** La rama y el remoto que Vercel debería estar construyendo. */
+const remotoActual = () => {
+  try {
+    const rama = execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf8" }).trim();
+    const remoto = execSync("git remote get-url origin", { encoding: "utf8" }).trim();
+    const commit = execSync("git log --oneline -1", { encoding: "utf8" }).trim();
+    return `Acá: rama "${rama}" de ${remoto}\n           último commit: ${commit}`;
+  } catch {
+    return "(no se pudo leer el estado de git)";
+  }
+};
 
 const pedir = async (metodo, ruta) => {
   const r = await axios({
@@ -56,13 +79,52 @@ console.log(`  /salud                     → ${salud.status} ${salud.cuerpo}`);
 console.log(`  /ruta-que-no-existe-jamas  → ${inventada.status}`);
 
 if (salud.status === 404 && inventada.status === 404) {
-  mal(
-    "TODO da 404, incluso /salud.\n" +
-      "      No es el código: es `vercel.json`. Tiene que estar en formato LEGACY\n" +
-      "      (version + builds + routes), NO en `rewrites`. Con rewrites, Express\n" +
-      "      recibe literalmente /src/server.js y no matchea nada.\n" +
-      "      Ver docs/ARQUITECTURA.md §11.1. Ya pasó en backend-traslado.",
-  );
+  mal("TODO da 404, incluso /salud. Ninguna petición está llegando a las rutas.");
+
+  /* El archivo local puede estar bien y el problema seguir: lo que importa no es
+     lo que dice el repo, es qué build está sirviendo el dominio. Distinguir esos
+     dos casos es la diferencia entre editar un archivo otra vez —inútil— y
+     mirar el dashboard. */
+  let config = null;
+  try {
+    config = JSON.parse(fsLeer("vercel.json"));
+  } catch {
+    /* Se corre desde otra carpeta: no se puede leer, y no es un problema. */
+  }
+
+  if (config && (config.rewrites || !config.builds)) {
+    console.log(`
+      CAUSA: este \`vercel.json\` usa \`rewrites\` (o le falta \`builds\`).
+      \`rewrites.destination\` REESCRIBE la URL: Express recibe literalmente
+      /src/server.js y no matchea nada.
+
+      ARREGLO: formato legacy — version + builds + routes. Ver
+      docs/ARQUITECTURA.md §11.1. Ya pasó en backend-traslado.`);
+  } else if (config) {
+    console.log(`
+      OJO: el \`vercel.json\` de ESTE repo ya está bien (builds + routes).
+      Entonces el archivo no es el problema — lo es QUÉ BUILD está sirviendo el
+      dominio. Tres cosas para mirar en Vercel, en este orden:
+
+        1. ¿El último build FALLÓ? Si falló, el dominio sigue sirviendo el
+           deployment anterior —el que tenía \`rewrites\`— y por eso no cambió
+           nada. El error del build lo dice todo.
+
+        2. ¿El deployment más nuevo está PROMOVIDO a producción? Un build que
+           salió bien pero no se promovió deja el alias en el viejo. Ya pasó en
+           backend-traslado (2026-09-04).
+
+        3. ¿Vercel está mirando esta rama y este repo?
+           ${remotoActual()}
+
+      Para separar (1) de (2): copiá la URL del deployment más reciente desde el
+      dashboard y probala directo, salteando el alias:
+
+        node scripts/verificar-despliegue.js https://<deployment>.vercel.app
+
+      Si ESA anda y el dominio no, es (2): falta promover.
+      Si ESA tampoco anda, el build no tomó el vercel.json nuevo.`);
+  }
 } else if (salud.status === 200) {
   ok("/salud responde 200 — el enrutamiento está bien");
 } else {
