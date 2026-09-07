@@ -1,13 +1,35 @@
 {
-  "functions": {
-    "src/server.js": {
-      "maxDuration": 300
-    }
-  },
-  "rewrites": [
+  "$comentario": [
+    "FORMATO LEGACY A PROPÓSITO: version + builds + routes. NO migrar a rewrites.",
+    "",
+    "`routes.dest` enruta SIN reescribir la URL, así que Express recibe /api/salud.",
+    "`rewrites.destination` SÍ la reescribe: Express recibe literalmente",
+    "/src/server.js, no matchea ninguna ruta y devuelve su propio 404.",
+    "",
+    "FIRMA DEL BUG: TODO responde el mismo 404 de 30 bytes con nuestro handler",
+    "({\"error\":\"Ruta no encontrada\"}), incluso /api/salud y rutas inventadas. En",
+    "los logs de Vercel se ve GET /src/server.js 404. Si ves eso, es esto — no es",
+    "el código.",
+    "",
+    "Pasó acá el 2026-09-07 y antes en backend-traslado. Con `builds`, Vercel",
+    "IGNORA la sección `functions`, así que el maxDuration va como",
+    "`export const maxDuration = 300` en src/server.js — sin eso el cron del",
+    "snapshot (27 s medidos) se corta en el timeout por defecto.",
+    "",
+    "Vercel avisa que `builds` es formato antiguo. IGNORAR EL AVISO: seguirlo es",
+    "exactamente lo que rompió esto, en los dos repos."
+  ],
+  "version": 2,
+  "builds": [
     {
-      "source": "/(.*)",
-      "destination": "src/server.js"
+      "src": "src/server.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "src/server.js"
     }
   ],
   "crons": [

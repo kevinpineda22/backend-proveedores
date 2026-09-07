@@ -59,4 +59,19 @@ if (process.env.VERCEL !== "1") {
   });
 }
 
+/**
+ * El límite de duración de la función en Vercel, en segundos.
+ *
+ * VA ACÁ Y NO EN `vercel.json`. Con el formato `builds` —que este proyecto usa a
+ * propósito, ver el comentario largo de vercel.json— Vercel **ignora la sección
+ * `functions`**, así que un `maxDuration` puesto allá no hace nada.
+ *
+ * 300 no es un número al azar: el cron del snapshot recorre las 190 páginas de
+ * la consulta de cotizaciones y tardó **27 s** medidos en producción. Con el
+ * timeout por defecto se cortaría a la mitad, dejando el catálogo escrito a
+ * medias y sin ningún error visible — el snapshot terminaría "bien" con una
+ * parte de los precios.
+ */
+export const maxDuration = 300;
+
 export default app;

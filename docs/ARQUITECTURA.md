@@ -699,6 +699,30 @@ El dominio nuevo del backend **debe agregarse al CSP** en
 `Pagina-web_React/public/.htaccess`, siguiendo el checklist de §5 de
 `docs/CSP_MIGRATION_GUIDE.md`. Se edita `public/`, nunca `dist/`.
 
+### 11.1 · ⚠️ `vercel.json` va en formato LEGACY. No lo modernices.
+
+`version` + `builds` + `routes`. **No `rewrites`.**
+
+`routes.dest` enruta sin reescribir la URL → Express recibe `/api/salud`.
+`rewrites.destination` sí la reescribe → Express recibe literalmente
+`/src/server.js`, no matchea nada y devuelve su propio 404.
+
+**Firma del bug:** *todo* responde el mismo 404 de 30 bytes con nuestro handler
+(`{"error":"Ruta no encontrada"}`), incluido `/api/salud` y cualquier ruta
+inventada. Si `/api/salud` y `/ruta-que-no-existe` dan lo MISMO, ninguna petición
+está llegando: no es la ruta que acabás de agregar.
+
+Pasó el **2026-09-07** en este repo y antes en `backend-traslado` (2026-09-04).
+Las dos veces por seguir el aviso de Vercel que dice que `builds` es antiguo.
+**Ignorar ese aviso.** El porqué está también dentro del propio `vercel.json`,
+en una clave `$comentario`: el archivo que se edita tiene que decir por qué no
+se toca.
+
+Y con `builds`, Vercel **ignora la sección `functions`**: el límite de duración
+va como `export const maxDuration = 300` en `src/server.js`. Sin eso el cron del
+snapshot —27 s medidos— se corta en el timeout por defecto y deja el catálogo
+escrito a medias, sin error visible.
+
 ---
 
 ## 12. Decisiones abiertas
