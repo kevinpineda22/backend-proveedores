@@ -19,6 +19,19 @@ const descuento = z.object({
   porcentaje: z.number().min(0).max(100),
 });
 
+/* Un impuesto es una LLAVE y un VALOR EN PESOS, no un porcentaje.
+   Las llaves observadas en producción son `ICO` e `IBU3` — la documentación del
+   conector decía "IBUA", que no existe. No se valida contra una lista cerrada: si
+   mañana la ley agrega una, un enum acá bloquearía el catálogo entero. La llave
+   sale del dato, no de un correo (ver PENDIENTES §2.1).
+
+   `valor: 0` es válido y NO es lo mismo que omitir el impuesto: cero dice "está
+   sujeto y hoy paga cero", la ausencia dice "no existe en esta fecha". */
+const impuesto = z.object({
+  llave: z.string().trim().min(1).max(10),
+  valor: z.number().min(0),
+});
+
 /* Cuántos decimales acepta el conector en un precio en COP.
 
    Verificado contra SIESA QA el 2026-09-02: `4891.27` entra, `4891.275` se
@@ -48,16 +61,59 @@ const precio = z
   });
 
 export const esquemas = {
-  /** POST /api/proveedor/solicitudes */
+  /** POST /api/proveedor/solicitudes — un PAQUETE de productos con UNA firma */
   crearSolicitud: z.object({
-    claveItem: z.string().min(1, "Falta el renglón a cotizar"),
-    precioPropuesto: precio,
-    // Máximo 3: es lo que la consulta de SIESA sabe leer. Escribir un cuarto
-    // orden sería cargar un descuento que después el portal no puede mostrar.
-    descuentosPropuestos: z.array(descuento).max(3).default([]),
-    fechaActivacion: fechaISO,
-    notas: z.string().max(255).optional().default(""),
+    lineas: z
+      .array(
+        z.object({
+          claveItem: z.string().min(1, "Falta el renglón a cotizar"),
+          precioPropuesto: precio,
+          // Máximo 3: es lo que la consulta de SIESA sabe leer. Escribir un cuarto
+          // orden sería cargar un descuento que después el portal no puede mostrar.
+          descuentosPropuestos: z.array(descuento).max(3).default([]),
+          /* OPCIONAL A PROPÓSITO, y `undefined` NO es `[]`:
+               ausente → el proveedor no los tocó, se re-emiten los vigentes
+               []      → los quitó
+             Un `.default([])` acá convertiría "no los tocó" en "los quitó" y le
+             borraría el ICO a cada producto que pase sin declararlos. */
+          impuestosPropuestos: z.array(impuesto).max(10).optional(),
+          fechaActivacion: fechaISO,
+          notas: z.string().max(255).optional().default(""),
+        }),
+      )
+      .min(1, "La solicitud no tiene ningún producto")
+      /* El tope es del plano que se le manda a SIESA, no de la pantalla. Un
+         paquete gigante es un POST gigante y un rechazo del ERP que no dice cuál
+         de las 400 líneas está mal. Que el corte lo ponga el portal, con un
+         mensaje que se entiende. */
+      .max(100, "No se pueden enviar más de 100 productos en una misma solicitud")
+      /* Dos veces el mismo renglón chocaría contra `idx_pp_lineas_pendiente_unica`
+         con un 23505 que se lee como "ya tiene una solicitud pendiente" — un
+         mensaje sobre otra solicitud, cuando el problema está en ésta. */
+      .refine(
+        (ls) => new Set(ls.map((l) => l.claveItem)).size === ls.length,
+        "Hay un producto repetido en la solicitud. Cada renglón puede ir una sola vez.",
+      ),
     firma: z.string().min(1, "Falta la firma"),
+  }),
+
+  /** POST /api/admin/solicitudes/lineas/aprobar — una, varias o todas */
+  resolverLineas: z.object({
+    lineaIds: z
+      .array(z.number().int().positive())
+      .min(1, "No se seleccionó ninguna línea")
+      .max(100),
+    confirmaDesactualizado: z.boolean().optional().default(false),
+  }),
+
+  /** POST /api/admin/solicitudes/lineas/rechazar */
+  rechazarLineas: z.object({
+    lineaIds: z.array(z.number().int().positive()).min(1, "No se seleccionó ninguna línea").max(100),
+    motivo: z
+      .string()
+      .trim()
+      .min(10, "Explique el motivo del rechazo (mínimo 10 caracteres)")
+      .max(1000),
   }),
 
   /** POST /api/admin/solicitudes/:id/rechazar */

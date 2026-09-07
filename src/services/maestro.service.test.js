@@ -136,3 +136,71 @@ test("la salida de normalizarTercero entra DIRECTO en derivarMaestro", () => {
   // llevaría el 17 % del maestro.
   assert.ok(proveedores.some((p) => p.nit === "10114433"));
 });
+
+/* ── Duplicados de (nit, sucursal) ─────────────────────────────────────────────
+   La consulta de terceros devuelve el mismo par más de una vez con nombres
+   distintos: 232 pares de 3.679, medido el 2026-09-06. Y como no puede llevar
+   ORDER BY, el orden de llegada no está garantizado — quedarse con el primero
+   hacía que el nombre cambiara solo entre corridas del cron.
+   ────────────────────────────────────────────────────────────────────────────── */
+
+const crudaTercero = (nit, sucursal, razon, desc) => ({
+  IdTercero: nit,
+  NitTercero: nit,
+  RazonSocial: razon,
+  Sucursal: sucursal,
+  DescSucursal: desc,
+});
+
+test("con (nit, sucursal) duplicado gana el nombre que NO es la razón social", () => {
+  // Caso real: ZONA 2 DISTRIBUCIONES SAS, sucursal 001. Llega dos veces porque el
+  // tercero está dado de alta en dos compañías. "ZONA 2 DISTRIBUCIONES SAS" es el
+  // relleno genérico; "COPA ZONA 2 RAMA" es el que dice cuál sucursal es.
+  const crudas = [
+    crudaTercero("900256457", "001", "ZONA 2 DISTRIBUCIONES SAS", "COPA ZONA 2 RAMA"),
+    crudaTercero("900256457", "001", "ZONA 2 DISTRIBUCIONES SAS", "ZONA 2 DISTRIBUCIONES SAS"),
+  ];
+  const { cuentas } = derivarMaestro(crudas.map(normalizarTercero));
+
+  assert.equal(cuentas.length, 1);
+  assert.equal(cuentas[0].nombre_sucursal, "COPA ZONA 2 RAMA");
+});
+
+test("y gana igual si el genérico llega PRIMERO", () => {
+  // Éste es el que importa: sin ORDER BY, el orden de llegada es el que sea. Si el
+  // resultado dependiera de él, la detección de sucursales hermanas (migración
+  // 007) encontraría el par un día y no lo encontraría al siguiente.
+  const crudas = [
+    crudaTercero("900256457", "001", "ZONA 2 DISTRIBUCIONES SAS", "ZONA 2 DISTRIBUCIONES SAS"),
+    crudaTercero("900256457", "001", "ZONA 2 DISTRIBUCIONES SAS", "COPA ZONA 2 RAMA"),
+  ];
+  const { cuentas } = derivarMaestro(crudas.map(normalizarTercero));
+
+  assert.equal(cuentas[0].nombre_sucursal, "COPA ZONA 2 RAMA");
+});
+
+test("si ninguno es la razón social, desempata estable en los dos órdenes", () => {
+  // Caso real: 1041233833 llega como "WILMER ADRIAN HOYOS GIRALDO" y como
+  // "HOYOS GIRALDO WILMER ADRIAN". Ninguno es mejor que el otro; lo único que se
+  // le pide al desempate es dar SIEMPRE lo mismo.
+  const a = crudaTercero("1041233833", "001", "OTRA RAZON", "WILMER ADRIAN HOYOS GIRALDO");
+  const b = crudaTercero("1041233833", "001", "OTRA RAZON", "HOYOS GIRALDO WILMER ADRIAN");
+
+  const uno = derivarMaestro([a, b].map(normalizarTercero)).cuentas[0].nombre_sucursal;
+  const otro = derivarMaestro([b, a].map(normalizarTercero)).cuentas[0].nombre_sucursal;
+
+  assert.equal(uno, otro, "el orden de llegada no puede cambiar el resultado");
+});
+
+test("un duplicado no crea una cuenta de más", () => {
+  // pp_cuentas tiene UNIQUE(nit, sucursal): si derivarMaestro devolviera dos, el
+  // upsert con ignoreDuplicates descartaría una en silencio.
+  const crudas = [
+    crudaTercero("800088702", "001", "EPS SURA", "EPS SURA"),
+    crudaTercero("800088702", "001", "EPS SURA", "EPS SURAMERICANA SA"),
+  ];
+  const { cuentas } = derivarMaestro(crudas.map(normalizarTercero));
+
+  assert.equal(cuentas.length, 1);
+  assert.equal(cuentas[0].nombre_sucursal, "EPS SURAMERICANA SA");
+});

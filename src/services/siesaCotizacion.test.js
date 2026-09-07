@@ -329,3 +329,179 @@ test("sandbox: no sale a la red aunque los datos sean válidos", async () => {
   // El armado se ejercitó igual: por eso el sandbox corta DESPUÉS de armar.
   assert.ok(r.payload[BLOQUES.descuentos]);
 });
+
+/* ── fusionarPayloads: el plano con varios encabezados ─────────────────────── */
+
+import { fusionarPayloads } from "./siesaCotizacion.js";
+
+const payloadDe = (item, { impuesto = false, descuento = false } = {}) => {
+  const p = {
+    "Encabezado Cotizaciones": [{ ITEM: String(item), PRECIO: "1000" }],
+  };
+  if (impuesto) p["Impuestos en Valor"] = [{ ITEM: String(item), LLAVE_IMPUESTO: "ICO" }];
+  if (descuento) p.Descuentos = [{ ITEM: String(item), NRO_ORDEN: "1" }];
+  return p;
+};
+
+test("fusiona los encabezados de varios payloads en uno solo", () => {
+  const r = fusionarPayloads([payloadDe(1), payloadDe(2), payloadDe(3)]);
+
+  assert.equal(r["Encabezado Cotizaciones"].length, 3);
+  assert.deepEqual(
+    r["Encabezado Cotizaciones"].map((e) => e.ITEM),
+    ["1", "2", "3"],
+    "y conserva el orden: el que revisa el log tiene que reconocer su paquete",
+  );
+});
+
+test("una sección que ningún payload trajo NO aparece", () => {
+  // Es la regla más cara de este módulo: mandar `"Descuentos": []` devuelve
+  // HTTP 400 con una advertencia por cada variable del conector. Verificado
+  // contra QA el 2026-08-27.
+  const r = fusionarPayloads([payloadDe(1), payloadDe(2)]);
+
+  assert.ok(!("Descuentos" in r));
+  assert.ok(!("Impuestos en Valor" in r));
+});
+
+test("basta que UN payload traiga impuestos para que la sección exista", () => {
+  // El caso más común del catálogo: 892 de las 1.237 cotizaciones de Altipal no
+  // tienen impuestos ni descuentos. En un paquete de 40 productos, que 39 no
+  // tengan ICO no puede hacer que el que sí lo tiene lo pierda.
+  const r = fusionarPayloads([payloadDe(1), payloadDe(2, { impuesto: true }), payloadDe(3)]);
+
+  assert.equal(r["Impuestos en Valor"].length, 1);
+  assert.equal(r["Impuestos en Valor"][0].ITEM, "2");
+  assert.equal(r["Encabezado Cotizaciones"].length, 3, "los tres encabezados siguen");
+});
+
+test("junta impuestos y descuentos de payloads distintos", () => {
+  const r = fusionarPayloads([
+    payloadDe(1, { impuesto: true }),
+    payloadDe(2, { descuento: true }),
+    payloadDe(3, { impuesto: true, descuento: true }),
+  ]);
+
+  assert.equal(r["Encabezado Cotizaciones"].length, 3);
+  assert.equal(r["Impuestos en Valor"].length, 2);
+  assert.equal(r.Descuentos.length, 2);
+});
+
+test("un solo payload pasa igual — el lote de uno no es un caso especial", () => {
+  const r = fusionarPayloads([payloadDe(7, { impuesto: true })]);
+
+  assert.equal(r["Encabezado Cotizaciones"].length, 1);
+  assert.equal(r["Impuestos en Valor"].length, 1);
+});
+
+test("sin payloads lanza, en vez de armar un plano vacío", () => {
+  // Un plano sin encabezados es un POST al ERP que no pide nada. Que falle acá y
+  // no allá: el error de SIESA no diría de dónde salió.
+  assert.throws(() => fusionarPayloads([]), TypeError);
+  assert.throws(() => fusionarPayloads(), TypeError);
+});
+
+test("payloads sin encabezado lanzan aunque traigan otras secciones", () => {
+  assert.throws(
+    () => fusionarPayloads([{ "Impuestos en Valor": [{ ITEM: "1" }] }]),
+    TypeError,
+  );
+});
+
+/* ── Impuestos editables (2026-09-06) ──────────────────────────────────────────
+   Hasta acá los impuestos se re-emitían fijos desde la vigente. Ahora el
+   proveedor los edita, y la diferencia entre "no dijo nada" y "los quitó" es
+   plata: un ICO que vuelve solo contradice lo que se firmó.
+   ────────────────────────────────────────────────────────────────────────────── */
+
+const vigenteConIco = () => ({
+  claveItem: "COP|800186960|006|2092|UND",
+  idTercero: "800186960",
+  sucursal: "006",
+  item: 2092,
+  unidadMedida: "UND",
+  precio: 12496.83,
+  moneda: "COP",
+  impuestos: [{ llave: "ICO", valor: 4313 }],
+  descuentos: [],
+  fechaActivacion: "2026-01-10",
+});
+
+const base = { precio: 13000, descuentos: [], fechaActivacion: "2026-12-01" };
+
+test("sin `impuestos` en la propuesta, se re-emiten los de la vigente", () => {
+  // El comportamiento de siempre, y el que evita que un ítem pierda su ICO al
+  // cambiar de fecha (le pasó al FOUR LOKO PONCHE FRUTAS: $5.102).
+  const p = armarPayload({
+    vigente: vigenteConIco(),
+    propuesta: { ...base },
+    hoy: "2026-09-06",
+  });
+
+  assert.equal(p["Impuestos en Valor"].length, 1);
+  assert.equal(p["Impuestos en Valor"][0].LLAVE_IMPUESTO.trim(), "ICO");
+});
+
+test("con `impuestos: []` la sección NO se manda — el impuesto queda quitado", () => {
+  // Quitado = AUSENCIA de la fila, no un valor 0. Como la fecha es parte de la
+  // llave, no emitirlo significa que no existe desde la fecha nueva.
+  const p = armarPayload({
+    vigente: vigenteConIco(),
+    propuesta: { ...base, impuestos: [] },
+    hoy: "2026-09-06",
+  });
+
+  assert.ok(!("Impuestos en Valor" in p), "una sección vacía se omite, no va en cero");
+});
+
+test("`impuestos: []` NO cae al vigente — es la diferencia entre ?? y ||", () => {
+  // Con `||`, un array vacío es falsy y caería a los impuestos de la vigente: el
+  // ICO volvería solo, en silencio, contra lo que el proveedor firmó. Este test
+  // existe para que ese cambio de una línea no pase desapercibido.
+  const p = armarPayload({
+    vigente: vigenteConIco(),
+    propuesta: { ...base, impuestos: [] },
+    hoy: "2026-09-06",
+  });
+
+  assert.notDeepEqual(p["Impuestos en Valor"], [
+    { LLAVE_IMPUESTO: "ICO", VALOR_IMPUESTO: "000000000004313.0000" },
+  ]);
+});
+
+test("un impuesto con otro valor se manda con el valor propuesto", () => {
+  const p = armarPayload({
+    vigente: vigenteConIco(),
+    propuesta: { ...base, impuestos: [{ llave: "ICO", valor: 5000 }] },
+    hoy: "2026-09-06",
+  });
+
+  assert.equal(p["Impuestos en Valor"].length, 1);
+  assert.match(p["Impuestos en Valor"][0].VALOR_IMPUESTO, /5000\.0000$/);
+});
+
+test("un impuesto en 0 SÍ se emite: decir que el ítem está sujeto es información", () => {
+  // No es lo mismo "no paga ICO" que "no está sujeto a ICO". El primero es una
+  // fila con valor 0; el segundo es la ausencia de la fila.
+  const p = armarPayload({
+    vigente: vigenteConIco(),
+    propuesta: { ...base, impuestos: [{ llave: "ICO", valor: 0 }] },
+    hoy: "2026-09-06",
+  });
+
+  assert.equal(p["Impuestos en Valor"].length, 1);
+  assert.match(p["Impuestos en Valor"][0].VALOR_IMPUESTO, /0\.0000$/);
+});
+
+test("los impuestos propuestos llevan FECHA_ACTIVACIÓN con tilde", () => {
+  // El encabezado usa FECHA_ACTIVACION sin tilde y los otros dos bloques CON
+  // tilde. Escribirlas iguales hace que SIESA rechace el bloque.
+  const p = armarPayload({
+    vigente: vigenteConIco(),
+    propuesta: { ...base, impuestos: [{ llave: "IBU3", valor: 120 }] },
+    hoy: "2026-09-06",
+  });
+
+  assert.ok("FECHA_ACTIVACIÓN" in p["Impuestos en Valor"][0]);
+  assert.ok("FECHA_ACTIVACION" in p["Encabezado Cotizaciones"][0]);
+});

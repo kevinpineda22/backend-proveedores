@@ -489,11 +489,59 @@ sección y no encuentra ninguna. Si la sección **no viene**, no la recorre.
 **La regla:** el encabezado va siempre; impuestos y descuentos **solo si tienen
 filas**. Está en `armarPayload()` y tiene test.
 
-### Por qué los impuestos no los edita el proveedor
+### ✅ Un plano admite VARIOS encabezados (medido 2026-09-06)
 
-ICO e IBUA los fija la ley, no la negociación. Se copian de la vigente. Su único
-motivo de existir en el payload es **no perderlos** al crear el registro con fecha
-nueva (§3).
+Con la agrupación de productos en una sola solicitud (migración 006) hacía falta
+saber si el paquete se manda en una transacción o en un envío por línea. Se midió
+con `scripts/prueba-lote-siesa.js`, contra QA:
+
+| Caso | Qué se mandó | Resultado |
+|---|---|---|
+| LOTE-1 | **3 ítems distintos** en un plano (uno con ICO, uno con descuento, uno pelado) | ✅ `codigo: 0` |
+| LOTE-2 | el **mismo ítem** en dos U.M., en múltiplo exacto, en un plano | ✅ `codigo: 0` |
+
+El conector acepta N encabezados. Las secciones de impuestos y descuentos se
+concatenan y siguen apareando por la llave natural, así que **basta que UNA línea
+traiga ICO para que la sección exista, sin que las otras la hereden**.
+
+`fusionarPayloads()` hace la fusión y mantiene la regla de la sección vacía. No
+revalida: cada payload ya salió de `armarPayload()`.
+
+⚠️ **Un "Importación exitosa" sobre un plano de 40 líneas no dice que entraron
+las 40.** Es un acuse de recibo de la transacción. Cuando el conector escriba en
+el mismo entorno del que se lee, `verificarCotizacion()` tiene que comprobar
+línea por línea — no alcanza con mirar la respuesta.
+
+### Los impuestos: por defecto se re-emiten, y desde 2026-09-06 se pueden editar
+
+Su motivo original de existir en el payload es **no perderlos** al crear el
+registro con fecha nueva (§3): sin ese bloque, un ítem nace sin su ICO.
+
+Por pedido de compras (2026-09-06) el proveedor ahora **sí puede editarlos**.
+`armarPayload()` distingue tres cosas, y la diferencia vale plata:
+
+| `propuesta.impuestos` | Qué manda | Qué significa |
+|---|---|---|
+| ausente (`undefined`) | los de la vigente | "no los toqué" — el comportamiento de siempre |
+| `[{llave, valor}]` | los propuestos | el proveedor cambió el valor |
+| `[]` | **no manda la sección** | el proveedor lo QUITÓ |
+| `[{llave:'ICO', valor:0}]` | una fila en 0 | está SUJETO al impuesto y hoy paga cero |
+
+Las dos últimas filas no son lo mismo y no hay que confundirlas: la ausencia dice
+"este impuesto no existe en esta fecha", el cero dice "existe y vale cero".
+
+En el código es un `??` y no un `||`. Con `||`, un array vacío —"lo quitó"— es
+falsy y caería a los impuestos de la vigente: el ICO volvería solo, en silencio,
+en contra de lo que el proveedor firmó. Hay un test que se llama así.
+
+**Medido contra QA el 2026-09-06** (`scripts/prueba-lote-siesa.js`): IMP-1 (otro
+valor) e IMP-2 (quitado) los dos con `codigo: 0`. Falta la comprobación en
+pantalla — ver PENDIENTES §2.4.
+
+**Lo que NO cambia: el tope de % no mira los impuestos.** Un impuesto lo fija la
+ley, no la negociación, así que el control correcto es que lo revise una persona
+de compras, no un umbral. Meterlos en el cálculo además lo **aflojaría**: un ítem
+de $10.000 con ICO $5.000 que sube a $11.000 pasaría de +10 % a +6,67 %.
 
 ### Un descuento quitado se representa por AUSENCIA
 

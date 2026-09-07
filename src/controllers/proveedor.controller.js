@@ -32,21 +32,47 @@ export async function crear(req, res, next) {
   }
 }
 
+/**
+ * Las solicitudes del proveedor, agrupadas en paquetes.
+ *
+ * Filtra `origen = 'proveedor'`: las líneas replicadas a sucursales hermanas las
+ * generó el sistema y el proveedor no sabe que existen. La política de RLS ya lo
+ * impide del lado de la base, pero acá se lee con la service key —que pasa por
+ * encima de RLS—, así que el filtro tiene que estar escrito igual. Las dos capas
+ * dicen lo mismo a propósito: ARQUITECTURA §5.
+ */
 export async function misSolicitudes(req, res, next) {
   try {
     const { data, error } = await supabase
-      .from("pp_solicitudes_precio")
+      .from("pp_solicitud_lineas")
       .select(
-        "id, clave_item, item, descripcion_item, unidad_medida, precio_actual, precio_propuesto, " +
-          "descuentos_actuales, descuentos_propuestos, costo_neto_actual, costo_neto_propuesto, " +
-          "variacion_pct, fecha_activacion, estado, motivo_rechazo, creado_at, resuelto_at",
+        "id, solicitud_id, clave_item, item, descripcion_item, unidad_medida, precio_actual, " +
+          "precio_propuesto, descuentos_actuales, descuentos_propuestos, impuestos_vigentes, " +
+          "impuestos_propuestos, costo_neto_actual, costo_neto_propuesto, variacion_pct, " +
+          "fecha_activacion, estado, motivo_rechazo, creado_at, resuelto_at, " +
+          "pp_solicitudes!inner(id, cuenta_id, creado_at)",
       )
-      .eq("cuenta_id", req.cuenta.id)
+      .eq("cuenta_destino_id", req.cuenta.id)
+      .eq("origen", "proveedor")
       .order("creado_at", { ascending: false })
-      .limit(200);
+      .limit(500);
 
     if (error) throw new Error(error.message);
-    res.json({ solicitudes: data ?? [] });
+
+    /* Se devuelven agrupadas por paquete, no sueltas: el proveedor firmó un
+       paquete y lo tiene que ver como lo firmó. Devolver 40 filas planas lo
+       obligaría a reconstruir a ojo qué mandó junto. */
+    const paquetes = new Map();
+    for (const l of data ?? []) {
+      const id = l.solicitud_id;
+      if (!paquetes.has(id)) {
+        paquetes.set(id, { id, creadoAt: l.pp_solicitudes?.creado_at ?? l.creado_at, lineas: [] });
+      }
+      const { pp_solicitudes, ...linea } = l;
+      paquetes.get(id).lineas.push(linea);
+    }
+
+    res.json({ solicitudes: [...paquetes.values()] });
   } catch (e) {
     next(e);
   }

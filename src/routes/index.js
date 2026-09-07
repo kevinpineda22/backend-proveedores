@@ -105,9 +105,19 @@ rAdmin.patch("/admins/:userId", validar(esquemas.cambiarEstadoAdmin), admin.camb
 
 rAdmin.get("/solicitudes", admin.bandeja);
 rAdmin.get("/firmas/:id", admin.verFirma);
-rAdmin.post("/solicitudes/:id/aprobar", admin.aprobarSolicitud);
-rAdmin.post("/solicitudes/:id/rechazar", validar(esquemas.rechazar), admin.rechazarSolicitud);
-rAdmin.post("/solicitudes/:id/reintentar", admin.reintentarSolicitud);
+
+/* Las tres resuelven LÍNEAS, no solicitudes (migración 006): reciben `lineaIds`.
+   Aprobar el paquete entero es mandar todas sus líneas, aprobar una es mandar una
+   — la API no distingue los dos casos, y por eso la pantalla puede ser flexible
+   sin lógica de más.
+
+   Van a `/solicitudes/lineas/...` y NO a `/solicitudes/:id/...`: el id de la
+   solicitud no participa de la operación, y dejarlo en la ruta invitaría a creer
+   que se resuelve el paquete completo. Además un lote puede tocar líneas de
+   solicitudes distintas. */
+rAdmin.post("/solicitudes/lineas/aprobar", validar(esquemas.resolverLineas), admin.aprobarSolicitud);
+rAdmin.post("/solicitudes/lineas/rechazar", validar(esquemas.rechazarLineas), admin.rechazarSolicitud);
+rAdmin.post("/solicitudes/lineas/reintentar", validar(esquemas.resolverLineas), admin.reintentarSolicitud);
 router.use("/admin", rAdmin);
 
 /* ── CRON ─────────────────────────────────────────────────────────────────

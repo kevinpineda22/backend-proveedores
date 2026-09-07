@@ -1,23 +1,21 @@
 /* =============================================================================
    Maestro de proveedores
 
-   ⚠️ FUENTE PROVISIONAL — se reemplaza cuando llegue la consulta de TERCEROS.
+   FUENTE: la consulta de TERCEROS (`merkahorro_terceros_dev_cotiz`), prendida en
+   producción el 2026-09-01. El maestro pasó de 337 proveedores derivados de
+   cotizaciones a 3.535 leídos del maestro real: un tercero dado de alta en SIESA
+   al que todavía no se le cargó ningún precio ahora aparece igual y se le puede
+   habilitar el acceso.
 
-   La consulta de cotizaciones ya trae todo lo que el maestro necesita:
-   `IdTercero`, `NitTercero`, `Sucursal`, `DescSucursal` y `RazonSocial`. Con eso
-   se puede derivar el maestro HOY y arrancar el flujo completo — asociar correo,
-   invitar, ingresar, cotizar— sin esperar nada.
+   (Hasta esa fecha el maestro se derivaba de las cotizaciones y SOLO veía
+   proveedores con precios cargados. Ya no. El SQL vive en
+   docs/CONSULTA-TERCEROS.sql, que es una COPIA: el original está en Connekta.)
 
-   QUÉ CAMBIA CUANDO LLEGUE LA CONSULTA DE TERCEROS
+   EL FILTRO ES UN JOIN POR TIPO DE TERCERO, NO UN WHERE SOBRE EL NIT
 
-   Solo esta función. Las tablas, los endpoints y el panel quedan igual, porque
-   `pp_proveedores` y `pp_cuentas` ya tienen la forma final.
-
-   QUÉ LE FALTA A ESTA VERSIÓN, Y HAY QUE TENERLO PRESENTE
-
-   Solo ve proveedores CON COTIZACIONES. Un tercero dado de alta en SIESA al que
-   todavía no se le cargó ningún precio no aparece acá, y no se le puede asociar
-   un correo. Con la consulta de terceros esa limitación desaparece.
+   `INNER JOIN t202_mm_proveedores`. Filtrar por la FORMA del NIT —"sacar las
+   personas, que son empleados"— se lleva 57 de los 337 proveedores con acuerdos
+   vigentes, que son personas naturales con NIT de cédula.
 
    QUÉ NO PISA, NUNCA
 
@@ -61,6 +59,50 @@ export function normalizarTercero(cruda) {
   };
 }
 
+/**
+ * ¿Cuál de dos nombres describe mejor a la MISMA sucursal?
+ *
+ * Hace falta porque la consulta de terceros devuelve el mismo `(nit, sucursal)`
+ * más de una vez con descripciones distintas — medido el 2026-09-06: **232 pares
+ * duplicados de 3.679**. Vienen del `INNER JOIN` contra `t202_mm_proveedores`,
+ * que empareja por `id_cia`: un tercero dado de alta en dos compañías del grupo
+ * aparece dos veces, y cada compañía le puso el nombre que quiso.
+ *
+ *     900256457 | 001 → "COPA ZONA 2  RAMA"  y  "ZONA 2 DISTRIBUCIONES SAS"
+ *     800088702 | 001 → "EPS SURA"           y  "EPS SURAMERICANA SA"
+ *
+ * Antes ganaba el primero que llegaba. Y como la consulta **no puede llevar
+ * `ORDER BY`** (Connekta la envuelve para paginar y SQL Server lo prohíbe ahí),
+ * el orden no está garantizado: el nombre de una sucursal podía cambiar de una
+ * corrida del cron a la siguiente, sin que nadie tocara nada.
+ *
+ * El criterio: gana el nombre que NO es la razón social. Cuando una compañía no
+ * le puso nombre propio a la sucursal, SIESA repite el de la empresa — que es el
+ * dato genérico. El otro es el que distingue la sucursal, y es justamente el que
+ * necesita la detección de sucursales hermanas (migración 007): sin él,
+ * "COPA ZONA 2 RAMA" desaparece y el par no se detecta nunca.
+ *
+ * Si los dos difieren de la razón social —o los dos coinciden— desempata el orden
+ * alfabético. Es arbitrario, pero es ESTABLE, que es lo único que se le pide a un
+ * desempate.
+ *
+ * ⚠️ ARREGLO DE FONDO, PENDIENTE DE SIESA: agregarle `f200_id_cia` a
+ * `merkahorro_terceros_dev_cotiz` y quedarse con la compañía donde viven los
+ * precios. Ahí no hay que adivinar nada. Esto es el paliativo mientras tanto.
+ */
+export function mejorNombreSucursal(a, b, razonSocial) {
+  if (!a) return b;
+  if (!b) return a;
+  if (a === b) return a;
+
+  const generico = String(razonSocial ?? "").trim().toUpperCase();
+  const aEsGenerico = a.trim().toUpperCase() === generico;
+  const bEsGenerico = b.trim().toUpperCase() === generico;
+
+  if (aEsGenerico !== bEsGenerico) return aEsGenerico ? b : a;
+  return a <= b ? a : b;
+}
+
 export function derivarMaestro(filas = []) {
   const proveedores = new Map();
   const cuentas = new Map();
@@ -79,12 +121,18 @@ export function derivarMaestro(filas = []) {
     }
 
     const clave = `${nit}|${sucursal}`;
+    const nombre = String(f.nombreSucursal ?? "").trim() || null;
+
     if (!cuentas.has(clave)) {
-      cuentas.set(clave, {
-        nit,
-        sucursal,
-        nombre_sucursal: String(f.nombreSucursal ?? "").trim() || null,
-      });
+      cuentas.set(clave, { nit, sucursal, nombre_sucursal: nombre });
+    } else {
+      // Duplicado: elegir, no quedarse con el que llegó primero.
+      const ya = cuentas.get(clave);
+      ya.nombre_sucursal = mejorNombreSucursal(
+        ya.nombre_sucursal,
+        nombre,
+        proveedores.get(nit)?.razon_social,
+      );
     }
   }
 

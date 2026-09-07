@@ -94,9 +94,11 @@ function llave({ idTercero, sucursal, item, unidadMedida, fechaActivacion }, cla
  * @param {object} args
  * @param {object} args.vigente     Cotización normalizada que rige hoy. Aporta la
  *                                  identidad (tercero, sucursal, ítem, U.M.) y los
- *                                  impuestos a re-emitir.
+ *                                  impuestos por defecto.
  * @param {object} args.propuesta   `{ precio, descuentos:[{orden,porcentaje}],
- *                                  fechaActivacion, notas }`.
+ *                                  fechaActivacion, notas, impuestos? }`.
+ *                                  `impuestos` es OPCIONAL: omitirlo re-emite los
+ *                                  de la vigente; pasar `[]` los quita a propósito.
  * @param {boolean} [args.permitirRetroactiva=false]
  * @param {string}  [args.hoy]      `AAAA-MM-DD`; por defecto, hoy en Colombia.
  * @returns {object} Body listo para el conector.
@@ -147,11 +149,32 @@ export function armarPayload({ vigente, propuesta, permitirRetroactiva = false, 
     NOTAS: campo.notas(propuesta.notas),
   };
 
-  /* Impuestos: se re-emiten TAL CUAL los de la cotización vigente, con la fecha
-     nueva. El proveedor no los edita — ICO e IBUA los fija la ley, no la
-     negociación. Si esta lista sale vacía teniendo la vigente impuestos, el ítem
-     pierde su ICO/IBUA en la fecha nueva. Ese es el bug que este bloque evita. */
-  const impuestos = (vigente.impuestos ?? []).map((imp) => ({
+  /* Impuestos.
+
+     POR DEFECTO se re-emiten TAL CUAL los de la cotización vigente, con la fecha
+     nueva. Si esta lista sale vacía teniendo la vigente impuestos, el ítem pierde
+     su ICO/IBUA en la fecha nueva: es el bug que ya le costó un ICO de $5.102 al
+     FOUR LOKO PONCHE FRUTAS.
+
+     Desde el 2026-09-06 el proveedor PUEDE editarlos, así que la propuesta manda
+     cuando trae `impuestos`. Ojo con la diferencia, que acá vale plata:
+
+         propuesta.impuestos === undefined  → re-emitir los vigentes (lo de siempre)
+         propuesta.impuestos === []         → QUITARLOS a propósito
+
+     Por eso `??` y no `||`: con `||`, un array vacío —"el proveedor quitó el
+     impuesto"— caería al vigente y el impuesto volvería solo, en silencio, en
+     contra de lo que se firmó.
+
+     Un impuesto quitado se representa por AUSENCIA de la fila, igual que los
+     descuentos: la fecha es parte de la llave, así que no emitirlo significa que
+     no existe en la fecha nueva. Verificado contra QA (caso IMP-2 de
+     scripts/prueba-lote-siesa.js).
+
+     El tope de % NO mira esto. Un impuesto lo fija la ley, no la negociación: el
+     control es que lo revise una persona de compras, no un umbral. Ver el
+     comentario de pp_solicitud_lineas.variacion_pct en la migración 006. */
+  const impuestos = (propuesta.impuestos ?? vigente.impuestos ?? []).map((imp) => ({
     ...llave(identidad, "FECHA_ACTIVACIÓN"),
     LLAVE_IMPUESTO: campo.llaveImpuesto(imp.llave),
     VALOR_IMPUESTO: campo.valorImpuesto(imp.valor),
@@ -190,6 +213,51 @@ export function armarPayload({ vigente, propuesta, permitirRetroactiva = false, 
   if (descuentos.length) payload[BLOQUES.descuentos] = descuentos;
   return payload;
 }
+
+/**
+ * Fusiona varios payloads de `armarPayload()` en UN solo plano.
+ *
+ * Existe porque una solicitud pasó a ser un PAQUETE de productos (migración 006),
+ * y hay dos formas de mandarlo al conector: un plano con N encabezados, o N
+ * envíos de un encabezado cada uno. Cuál se usa **se mide, no se supone** — para
+ * eso está `scripts/prueba-lote-siesa.js`.
+ *
+ * ⚠️ EL RIESGO CONOCIDO DE MANDARLO JUNTO
+ * QA reportó el 2026-09-02 que SIESA saca *"el precio es exactamente igual"*
+ * cuando dos presentaciones del mismo ítem quedan en múltiplo exacto (UND 4.000
+ * y P2 8.000). Se midió que NO afectaba al portal, y la razón era precisa:
+ * `armarPayload` arma **un encabezado por envío**. Agrupar reabre esa puerta. Si
+ * el lote resulta aceptado, el armador tiene que seguir sin poder meter dos
+ * presentaciones del mismo ítem en el mismo plano.
+ *
+ * No revalida nada: cada payload ya salió de `armarPayload`, que validó formato,
+ * llave, moneda y fecha. Acá solo se concatenan las secciones.
+ *
+ * Mantiene la regla de la sección vacía: una sección que quedó sin filas NO
+ * aparece en el resultado. Mandar `"Descuentos": []` devuelve HTTP 400.
+ *
+ * @param {object[]} payloads
+ * @returns {object} un solo body para el conector
+ */
+export function fusionarPayloads(payloads = []) {
+  if (!Array.isArray(payloads) || payloads.length === 0) {
+    throw new TypeError("fusionarPayloads: hace falta al menos un payload");
+  }
+
+  const fusionado = {};
+  for (const bloque of Object.values(BLOQUES)) {
+    const filas = payloads.flatMap((p) => p?.[bloque] ?? []);
+    if (filas.length) fusionado[bloque] = filas;
+  }
+
+  if (!fusionado[BLOQUES.encabezado]) {
+    throw new TypeError("fusionarPayloads: ningún payload trajo encabezado");
+  }
+  return fusionado;
+}
+
+/** Solo para los scripts de medición contra QA. La ruta normal es `importarCotizacion`. */
+export const postConectorCrudo = (payload) => postConector(payload);
 
 /* ── Lectura de la respuesta ─────────────────────────────────────────────── */
 
@@ -281,8 +349,38 @@ async function postConector(payload) {
  * @throws {Error} si SIESA rechaza (con `siesaData` y `httpStatus` adjuntos)
  */
 export async function importarCotizacion({ solicitudId, ...args }) {
+  return importarLote({ referencia: solicitudId, cotizaciones: [args] });
+}
+
+/**
+ * Importa a SIESA UN PAQUETE de cambios de precio ya aprobados.
+ *
+ * Es el ÚNICO camino hacia el conector: `importarCotizacion` es un lote de uno.
+ * Tener dos funciones que postean por su cuenta terminaría en dos juegos de
+ * guardas que se desincronizan — la misma razón por la que `reintentar()` no
+ * re-empuja y vuelve a pasar por `aprobar()`.
+ *
+ * TODO O NADA. Un lote es UNA transacción del ERP: o entra completo o no entra.
+ * Por eso quien lo llama tiene que haber tomado TODAS las líneas antes de
+ * llamarlo, y marcarlas todas igual según el resultado. Partirlo por la mitad
+ * dejaría media solicitud aplicada y media pendiente, sin nadie que lo sepa.
+ *
+ * @param {object}   args
+ * @param {string|number} args.referencia   Para el log. No viaja a SIESA.
+ * @param {object[]} args.cotizaciones      Los `{vigente, propuesta, ...}` de armarPayload.
+ * @returns {Promise<{ok: true, sandbox?: true, payload: object, respuesta: object}>}
+ */
+export async function importarLote({ referencia, cotizaciones = [] }) {
   const faltan = configFaltante();
   if (faltan.length) throw new ConfigSiesaError(faltan);
+
+  if (!cotizaciones.length) {
+    const e = new TypeError("importarLote: no hay cotizaciones que importar");
+    e.enviadoASiesa = false;
+    throw e;
+  }
+
+  const solicitudId = referencia;
 
   // `enviadoASiesa` distingue "el ERP lo rechazó" de "no salió de acá".
   //
@@ -292,7 +390,7 @@ export async function importarCotizacion({ solicitudId, ...args }) {
   // ERP un problema que nunca llegó ahí.
   let payload;
   try {
-    payload = armarPayload(args);
+    payload = fusionarPayloads(cotizaciones.map((c) => armarPayload(c)));
   } catch (e) {
     e.enviadoASiesa = false;
     throw e;
@@ -322,7 +420,8 @@ export async function importarCotizacion({ solicitudId, ...args }) {
     const impuestosEnPayload = payload[BLOQUES.impuestos] ?? [];
     const descuentosEnPayload = payload[BLOQUES.descuentos] ?? [];
     console.warn(
-      `[siesa] 🧪 SANDBOX — solicitud ${solicitudId ?? "?"} NO se importó. ` +
+      `[siesa] 🧪 SANDBOX — ${solicitudId ?? "?"} NO se importó. ` +
+        `${payload[BLOQUES.encabezado].length} encabezado(s), ` +
         `${impuestosEnPayload.length} impuesto(s), ` +
         `${descuentosEnPayload.length} descuento(s). Payload:\n` +
         JSON.stringify(payload, null, 2),

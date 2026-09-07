@@ -1,6 +1,12 @@
 import { supabase } from "../config/supabase.js";
 import { createError } from "../middleware/errorHandler.js";
-import { aprobar, rechazar, reintentar, vigenteDe } from "../services/solicitud.service.js";
+import {
+  aprobarLineas,
+  rechazarLineas,
+  reintentar,
+  vigenteDe,
+  cambianImpuestos,
+} from "../services/solicitud.service.js";
 import { excedeTope } from "../services/costoNeto.js";
 import { revalidarTope } from "../services/revalidarTope.js";
 
@@ -61,22 +67,36 @@ export async function configurarProveedor(req, res, next) {
   }
 }
 
-/** Bandeja de novedades: lo que espera respuesta primero. */
+/**
+ * Bandeja de novedades: lo que espera respuesta primero.
+ *
+ * Devuelve LÍNEAS agrupadas por paquete. El admin resuelve por línea —aprobar
+ * tres y rechazar una es normal— pero tiene que ver de qué paquete salen: el
+ * proveedor las mandó juntas y las firmó juntas.
+ *
+ * ⚠️ ACÁ SÍ SE VEN LAS RÉPLICAS. El proveedor no sabe que su propuesta también
+ * va a la sucursal hermana —es un reparto interno de Merkahorro—, pero compras
+ * tiene que verlo: es su decisión y su plata. Medido el 2026-09-06, de 521
+ * renglones comparados entre hermanas, 16 ya tienen precio distinto hoy. Una
+ * réplica que nadie mira pisa esas diferencias en silencio.
+ */
 export async function bandeja(req, res, next) {
   try {
     const estado = req.query.estado || "pendiente";
     const { data, error } = await supabase
-      .from("pp_solicitudes_precio")
+      .from("pp_solicitud_lineas")
       .select(
-        "id, cuenta_id, clave_item, item, descripcion_item, unidad_medida, " +
-          "precio_actual, precio_propuesto, descuentos_actuales, descuentos_propuestos, " +
+        "id, solicitud_id, cuenta_destino_id, origen, replica_de_id, clave_item, item, " +
+          "descripcion_item, unidad_medida, precio_actual, precio_propuesto, " +
+          "descuentos_actuales, descuentos_propuestos, impuestos_vigentes, impuestos_propuestos, " +
           "costo_neto_actual, costo_neto_propuesto, variacion_pct, porcentaje_max_vigente, " +
-          "fecha_activacion, notas, estado, motivo_rechazo, firma_id, creado_at, resuelto_at, " +
-          "pp_cuentas(nit, sucursal, nombre_sucursal, pp_proveedores(razon_social))",
+          "fecha_activacion, notas, estado, motivo_rechazo, creado_at, resuelto_at, " +
+          "pp_solicitudes!inner(id, cuenta_id, firma_id, creado_at), " +
+          "pp_cuentas!pp_solicitud_lineas_cuenta_destino_id_fkey(nit, sucursal, nombre_sucursal, pp_proveedores(razon_social))",
       )
       .eq("estado", estado)
       .order("creado_at", { ascending: true })
-      .limit(500);
+      .limit(1000);
 
     if (error) throw new Error(error.message);
 
@@ -94,11 +114,16 @@ export async function bandeja(req, res, next) {
     const filas = data ?? [];
     const revalidar = estado === "pendiente";
 
-    const solicitudes = await Promise.all(
+    const lineas = await Promise.all(
       filas.map(async (s) => {
         const base = {
           ...s,
           excede_tope: excedeTope(s.variacion_pct, s.porcentaje_max_vigente),
+          /* Un cambio de impuestos NO pasa por el tope: un ICO lo fija la ley, no
+             la negociación, y meterlo en el porcentaje lo aflojaría. El único
+             control que queda es que una persona lo mire, así que la fila tiene
+             que decirlo sola. */
+          cambia_impuestos: cambianImpuestos(s.impuestos_vigentes, s.impuestos_propuestos),
         };
         if (!revalidar) return base;
 
@@ -111,11 +136,40 @@ export async function bandeja(req, res, next) {
         } catch (e) {
           // Un fallo al releer NO puede tumbar la bandeja: sin ella el admin no
           // puede operar nada. Se degrada a la marca congelada y se deja rastro.
-          console.warn(`[bandeja] no se pudo revalidar la solicitud ${s.id}: ${e.message}`);
+          console.warn(`[bandeja] no se pudo revalidar la línea ${s.id}: ${e.message}`);
           return base;
         }
       }),
     );
+
+    /* Agrupadas por paquete. El resumen de arriba es para PRIORIZAR —cuántas
+       líneas, cuántas se pasan del tope, cuántas tocan impuestos—; lo que se
+       aprueba sigue siendo la línea. */
+    const paquetes = new Map();
+    for (const l of lineas) {
+      const id = l.solicitud_id;
+      if (!paquetes.has(id)) {
+        paquetes.set(id, {
+          id,
+          cuentaId: l.pp_solicitudes?.cuenta_id,
+          firmaId: l.pp_solicitudes?.firma_id,
+          creadoAt: l.pp_solicitudes?.creado_at ?? l.creado_at,
+          proveedor: l.pp_cuentas?.pp_proveedores?.razon_social ?? null,
+          lineas: [],
+        });
+      }
+      paquetes.get(id).lineas.push(l);
+    }
+
+    const solicitudes = [...paquetes.values()].map((p) => ({
+      ...p,
+      resumen: {
+        lineas: p.lineas.length,
+        replicadas: p.lineas.filter((l) => l.origen === "replica").length,
+        excedenTope: p.lineas.filter((l) => l.excede_tope).length,
+        cambianImpuestos: p.lineas.filter((l) => l.cambia_impuestos).length,
+      },
+    }));
 
     res.json({ solicitudes });
   } catch (e) {
@@ -140,11 +194,18 @@ export async function verFirma(req, res, next) {
   }
 }
 
+/**
+ * POST /api/admin/solicitudes/lineas/aprobar
+ *
+ * Recibe `lineaIds`, no un id de solicitud. Aprobar "todo el paquete" es mandar
+ * todas sus líneas; aprobar una es mandar una. Que la API no distinga los dos
+ * casos es lo que hace que la pantalla pueda ser flexible sin lógica de más.
+ */
 export async function aprobarSolicitud(req, res, next) {
   try {
     res.json(
-      await aprobar({
-        solicitudId: req.params.id,
+      await aprobarLineas({
+        lineaIds: req.body.lineaIds,
         admin: req.admin,
         ip: req.ip,
         // El admin ya vio el aviso de precio desactualizado y decidió seguir.
@@ -160,8 +221,8 @@ export async function aprobarSolicitud(req, res, next) {
 export async function rechazarSolicitud(req, res, next) {
   try {
     res.json(
-      await rechazar({
-        solicitudId: req.params.id,
+      await rechazarLineas({
+        lineaIds: req.body.lineaIds,
         motivo: req.body.motivo,
         admin: req.admin,
         ip: req.ip,
@@ -372,7 +433,7 @@ export async function cambiarEstadoAdmin(req, res, next) {
 /** Devuelve una solicitud con problema a la cola de pendientes. */
 export async function reintentarSolicitud(req, res, next) {
   try {
-    res.json(await reintentar({ solicitudId: req.params.id, admin: req.admin, ip: req.ip }));
+    res.json(await reintentar({ lineaIds: req.body.lineaIds, admin: req.admin, ip: req.ip }));
   } catch (e) {
     next(e);
   }

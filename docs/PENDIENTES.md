@@ -517,10 +517,23 @@ puede provocar. **Si SIESA rechazara el múltiplo exacto, esos 321 pares no
 podrían existir.** Esa contradicción era la señal de que había que medir antes
 de validar.
 
-⚠️ **Lo que sí hay que recordar:** esto vale mientras el portal mande **un
-renglón por envío**. Si algún día se agrupan varias solicitudes en un mismo
-plano —por volumen, por ejemplo— este límite vuelve a aparecer, y ahí sí hay que
-detectarlo antes de enviar.
+#### ✅ Y el "lo que sí hay que recordar" también quedó medido (2026-09-06)
+
+Acá decía: *"esto vale mientras el portal mande un renglón por envío; si algún
+día se agrupan varias solicitudes en un mismo plano, el límite vuelve"*. Llegó
+ese día —la agrupación de productos en una sola solicitud, migración 006— así que
+se midió en vez de asumirlo.
+
+| Caso | Qué se mandó | Resultado |
+|---|---|---|
+| LOTE-2 | ítem 1032 en **UND 4.000 y P2 8.000**, los dos en el MISMO plano | ✅ `codigo: 0` |
+
+**El límite no vuelve.** El múltiplo exacto entra igual en un plano compartido.
+`scripts/prueba-lote-siesa.js --caso LOTE-2`.
+
+Queda pendiente lo único que el código no puede comprobar: **mirar en la pantalla
+de QA que las dos filas estén de verdad** (§2.4). El conector lee de producción y
+escribe en QA, así que `verificarCotizacion()` no cierra el círculo.
 
 **De paso, un dato del catálogo que no estaba documentado:** la unidad de medida
 CODIFICA el factor. `P2` son 2 unidades, `P4` son 4, `P6` son 6, `P8` son 8.
@@ -689,6 +702,82 @@ Hoy **por NIT**. El modelo aguanta bajarlo a sucursal con una columna nullable e
 
 Hoy: `precio_actual` quedó congelado y el admin ve el comparativo. Falta decidir
 si eso amerita una advertencia más fuerte o un rechazo automático.
+
+---
+
+### 2.4 · ⏳ Mirar en la pantalla de SIESA QA qué dejaron las pruebas del 2026-09-06
+
+Se mandaron cuatro pruebas a QA con `scripts/prueba-lote-siesa.js --real`. **Las
+cuatro contestaron `codigo: 0`, y eso es un acuse de recibo, no una prueba.** Acá
+no se puede verificar por código: la consulta LEE de producción y el conector
+ESCRIBE en QA (§1.4), la misma asimetría que hace que `verificarCotizacion()`
+devuelva `no_verificable`.
+
+Todo sobre la cuenta de prueba **ALTIPAL, NIT 800186960, sucursal 006**.
+
+| Prueba | Fecha activación | Qué tiene que verse | Si NO se ve |
+|---|---|---|---|
+| **LOTE-1** | 2026-11-18 | **Tres** filas: ítems 9659, 2092 y 10765. El **2092 con su ICO de 4.313**, el 9659 con su descuento. | Si hay menos de tres, el plano múltiple escribe parcial y el paquete va en envíos separados. |
+| **LOTE-2** | 2026-11-18 | **Dos** filas del ítem **1032**: UND en 4.000 y P2 en 8.000. | Si hay una sola, el múltiplo exacto sí molesta cuando van juntas y hay que separarlas por plano. |
+| **IMP-1** | 2026-11-19 | Ítem 2092 con **ICO 5.000** (el vigente es 4.313). | El conector no deja cambiar el valor de un impuesto y hay que replantear el requerimiento. |
+| **IMP-2** | 2026-11-20 | Ítem 2092 **SIN ninguna fila de ICO**. | Quitar un impuesto por ausencia no funciona: habría que emitirlo en 0, que significa otra cosa (que está sujeto y paga cero). |
+
+Las tres de la 2092 son a propósito en **fechas distintas**: la fecha es parte de
+la llave, y en la misma fecha el segundo envío pisaría al primero — no se podría
+distinguir "nació sin ICO" de "el ICO quedó del envío anterior".
+
+### 2.5 · ⏳ Agregarle `f200_id_cia` a la consulta `merkahorro_terceros_dev_cotiz`
+
+La consulta devuelve el mismo `(NIT, sucursal)` **más de una vez con descripciones
+distintas**: 232 pares de 3.679, medido el 2026-09-06.
+
+```
+900256457 | 001 → "COPA ZONA 2  RAMA"   y   "ZONA 2 DISTRIBUCIONES SAS"
+800088702 | 001 → "EPS SURA"            y   "EPS SURAMERICANA SA"
+```
+
+Sale del `INNER JOIN` contra `t202_mm_proveedores`, que empareja por `id_cia`: un
+tercero dado de alta en dos compañías del grupo aparece dos veces, y cada compañía
+le puso el nombre que quiso. Como la consulta **no puede llevar `ORDER BY`**
+(§1.1), el orden de llegada no está garantizado.
+
+Hay un paliativo en `mejorNombreSucursal()` — gana el nombre que no es la razón
+social, con desempate alfabético estable, 4 tests. **Pero adivina.** Con la
+columna `f200_id_cia` en el SELECT se puede quedar con la compañía donde viven los
+precios y no hay nada que adivinar.
+
+Mientras tanto, la detección de sucursales hermanas (migración 007) puede estar
+incompleta. Por eso su bloque `DO` es idempotente: cuando la columna esté, se
+vuelve a correr.
+
+### 2.6 · ⏳ ¿Existe un descuento en orden 4? — la consulta SQL ya está escrita
+
+Esto ya estaba anotado en `CONTRATO-SIESA.md §1bis.f` pero nadie lo llevó a
+SIESA, y es el que puede costar plata de los tres:
+
+```sql
+SELECT f214_orden, COUNT(*) FROM dbo.t214_mm_cotizacion_dscto GROUP BY f214_orden;
+```
+
+La consulta del portal lee los órdenes 1 a 3, y **23 renglones ya usan el 3** —el
+techo—. `F214_ORDEN` admite hasta 9. Si aparece un orden 4:
+
+1. El costo neto sale **más alto** que el real → el tope se calcula mal y deja
+   pasar subidas que debería frenar.
+2. Al re-emitir, ese descuento **se pierde** — el mismo daño de §3 del contrato,
+   pero causado por nosotros.
+
+Si el resultado no pasa de 3, quedamos como estamos.
+
+### 2.7 · ⏳ ¿Los descuentos por orden se componen en CASCADA o se SUMAN?
+
+El costo neto se calcula `precio × (1-d1) × (1-d2) × (1-d3)` (cascada, constante
+`MODO_DESCUENTO` en `src/services/costoNeto.js`). **Es un supuesto, no un dato
+confirmado.**
+
+Con un solo descuento da igual. Con dos o tres, no — y hoy son **76 renglones**
+(53 con dos descuentos, 23 con tres). Es una pregunta para compras, no para
+sistemas.
 
 ---
 

@@ -74,11 +74,22 @@ otra consulta, no un permiso faltante.
 | GET | `/api/admin/proveedores` · `/solicitudes` · `/firmas/:id` | `pp_admins` |
 | PATCH | `/api/admin/proveedores/:nit` | `pp_admins` |
 | POST | `/api/admin/cuentas/:id/invitar` | `pp_admins` |
-| POST | `/api/admin/solicitudes/:id/aprobar` · `/rechazar` | `pp_admins` |
+| POST | `/api/admin/solicitudes/lineas/aprobar` · `/rechazar` · `/reintentar` | `pp_admins` |
 | GET | `/api/admin/admins` | `pp_admins` |
 | POST | `/api/admin/admins` | `pp_admins` |
 | PATCH | `/api/admin/admins/:userId` | `pp_admins` |
 | POST | `/api/cron/snapshot` | `CRON_SECRET` |
+
+**Una solicitud es un PAQUETE** desde la migración 006. `POST
+/api/proveedor/solicitudes` recibe `{lineas: [...], firma}` — una firma para todo
+el paquete — y las tres rutas de resolución reciben `{lineaIds: [...]}`, no un id
+de solicitud: el admin aprueba línea por línea, y aprobar "todo" es mandarlas
+todas. Ver `docs/COMO-FUNCIONA.md`.
+
+`COMPRAS_EMAIL` es el destino del aviso a compras. Mientras no esté, el aviso se
+escribe en el log y la solicitud se crea igual — a propósito: el portal está en
+pruebas y llenarle la casilla a alguien con correos de prueba es peor que no
+avisar.
 
 ---
 
