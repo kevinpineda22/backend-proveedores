@@ -206,3 +206,33 @@ export function evaluarPropuesta({
     excede: excedeTope(variacionPct, tope),
   };
 }
+
+/**
+ * Qué tope rige para una cuenta.
+ *
+ * Desde la migración 009 el tope es **por sucursal** (decidido por compras el
+ * 2026-09-07), con el del NIT como valor por defecto:
+ *
+ *     pp_cuentas.porcentaje_max      manda si NO es NULL
+ *     pp_proveedores.porcentaje_max  rige cuando la cuenta no tiene el suyo
+ *
+ * ⚠️ TRES ESTADOS, NO DOS, y confundirlos cuesta plata:
+ *
+ *     cuenta = 5      → 5 % para ESTA sucursal
+ *     cuenta = 0      → NINGUNA subida en esta sucursal (¡no es "sin tope"!)
+ *     cuenta = NULL   → hereda el del NIT
+ *
+ * El `0` es el peligroso: es un valor legítimo y es *falsy*, así que un `||` lo
+ * trataría como ausente y le devolvería el tope del NIT a una sucursal que
+ * Merkahorro congeló a propósito. Por eso `??` y una función con nombre, en un
+ * solo lugar — repartir esta decisión por cada consulta es garantizar que en
+ * alguna se escriba `||`.
+ *
+ * @param {{porcentajeMax?: number|null}} cuenta
+ * @param {{porcentajeMax?: number|null}} proveedor
+ * @returns {number|null} el tope, o `null` para SIN TOPE
+ */
+export function topeDe(cuenta, proveedor) {
+  const suyo = cuenta?.porcentajeMax;
+  return suyo === null || suyo === undefined ? (proveedor?.porcentajeMax ?? null) : suyo;
+}

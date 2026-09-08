@@ -17,6 +17,7 @@ import { supabase } from "../config/supabase.js";
 import { createError } from "../middleware/errorHandler.js";
 import { emailSintetico, normalizarNit } from "./emailSintetico.js";
 import { enviar, modoPrueba } from "./email.service.js";
+import { auditar } from "./auditoria.js";
 
 const HORAS_VIGENCIA = Number(process.env.PROVEEDORES_INVITACION_HORAS) || 72;
 
@@ -140,18 +141,18 @@ export async function invitar({ cuentaId, correo, admin, ip }) {
     html: htmlInvitacion({ cuenta, enlace }),
   });
 
-  await supabase.from("pp_auditoria").insert({
+  await auditar({
     entidad: "pp_cuentas",
-    entidad_id: String(cuentaId),
+    entidadId: cuentaId,
     accion: "invitar",
-    estado_anterior: cuenta.estado,
-    estado_nuevo: "invitado",
-    actor_user_id: admin?.userId ?? null,
-    actor_rol: "pp_admin",
+    estadoAnterior: cuenta.estado,
+    estadoNuevo: "invitado",
+    actorUserId: admin?.userId ?? null,
+    actorRol: "pp_admin",
     // El correo del destinatario SÍ va al log (es a quién se le dio acceso);
     // el token NO — de eso solo existe el hash.
     detalle: { correo, correoEnviado: envio.enviado, motivo: envio.motivo ?? null },
-    ip: ip ?? null,
+    ip,
   });
 
   return {
@@ -217,14 +218,14 @@ export async function activar({ token, clave }) {
 
   await supabase.from("pp_cuentas").update({ estado: "activo" }).eq("id", cuenta.id);
 
-  await supabase.from("pp_auditoria").insert({
+  await auditar({
     entidad: "pp_cuentas",
-    entidad_id: String(cuenta.id),
+    entidadId: cuenta.id,
     accion: "activar",
-    estado_anterior: "invitado",
-    estado_nuevo: "activo",
-    actor_user_id: cuenta.user_id,
-    actor_rol: "pp_proveedor",
+    estadoAnterior: "invitado",
+    estadoNuevo: "activo",
+    actorUserId: cuenta.user_id,
+    actorRol: "pp_proveedor",
   });
 
   return { ok: true, nit: cuenta.nit, sucursal: cuenta.sucursal };
@@ -365,26 +366,24 @@ export async function solicitarRecuperacion(
     html: htmlRecuperacion({ cuenta, enlace }),
   });
 
-  const { error: errorAuditoria } = await cliente.from("pp_auditoria").insert({
-    entidad: "pp_cuentas",
-    entidad_id: String(cuenta.id),
-    accion: "recuperar_clave",
-    actor_rol: "pp_proveedor",
-    // El correo NO va al detalle: esta acción la puede disparar cualquiera desde
-    // internet, y el log no tiene por qué acumular a quién se le escribió.
-    detalle: { correoEnviado: envio.enviado, motivo: envio.motivo ?? null },
-    ip: ip ?? null,
-  });
-
-  // El correo ya pudo haber salido: devolver 500 acá invitaría al cliente a
-  // reintentar y mandar otro. La recuperación sigue siendo válida, pero el
-  // fallo de auditoría no queda invisible para monitoreo.
-  if (errorAuditoria) {
-    console.error(
-      `[recuperacion] no se pudo auditar la solicitud de la cuenta ${cuenta.id}: ` +
-        errorAuditoria.message,
-    );
-  }
+  /* El correo ya pudo haber salido: si esto falla NO se devuelve 500, porque
+     invitaría al cliente a reintentar y mandar otro. `auditar` ya cumple esa
+     regla —nunca lanza, siempre registra el fallo— y por eso acá no hace falta
+     mirar lo que devuelve. Se le pasa `cliente` y no el global: esta ruta es
+     pública y usa el suyo. */
+  await auditar(
+    {
+      entidad: "pp_cuentas",
+      entidadId: cuenta.id,
+      accion: "recuperar_clave",
+      actorRol: "pp_proveedor",
+      // El correo NO va al detalle: esta acción la puede disparar cualquiera desde
+      // internet, y el log no tiene por qué acumular a quién se le escribió.
+      detalle: { correoEnviado: envio.enviado, motivo: envio.motivo ?? null },
+      ip,
+    },
+    cliente,
+  );
 
   return { ok: true, ...(esModoPrueba() ? { enlacePrueba: enlace } : {}) };
 }

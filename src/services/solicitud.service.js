@@ -29,6 +29,7 @@ import { verificarEnSiesa, NO_CONFIRMA } from "./verificarCotizacion.js";
 import { revalidarTope } from "./revalidarTope.js";
 import { notificarResolucion } from "./notificacion.service.js";
 import { avisarSolicitudNueva } from "./compras.service.js";
+import { auditar } from "./auditoria.js";
 import {
   hermanasDe,
   vigentesEnSucursal,
@@ -1115,21 +1116,8 @@ export async function catalogoDe(cuenta) {
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
-/** Nunca lanza: una auditoría que falla no puede tumbar la operación auditada. */
-async function auditar({ entidad, entidadId, accion, estadoAnterior, estadoNuevo, actorUserId, actorRol, detalle, ip }) {
-  try {
-    await supabase.from("pp_auditoria").insert({
-      entidad,
-      entidad_id: String(entidadId),
-      accion,
-      estado_anterior: estadoAnterior ?? null,
-      estado_nuevo: estadoNuevo ?? null,
-      actor_user_id: actorUserId ?? null,
-      actor_rol: actorRol ?? null,
-      detalle: detalle ?? null,
-      ip: ip ?? null,
-    });
-  } catch (e) {
-    console.error(`[auditoria] no se pudo registrar "${accion}":`, e?.message);
-  }
-}
+/* `auditar` se mudó a `./auditoria.js` — mismo nombre y misma firma, así que las
+   nueve llamadas de este archivo no cambiaron. Lo que cambió es que ahora SÍ mira
+   el error que devuelve el insert: el try/catch que estaba acá cubría los errores
+   lanzados, y un rechazo de Postgres no se lanza, se devuelve. Ver el encabezado
+   de ese archivo. */

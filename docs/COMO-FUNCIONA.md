@@ -160,7 +160,13 @@ POST /api/cron/snapshot     header: x-cron-secret
    nunca con cero filas, y nunca si el catálogo encogió a menos de la mitad.
 5. Deriva el maestro (`pp_proveedores`, `pp_cuentas`) del mismo snapshot.
 
-Medido en producción: **18.866 cotizaciones, 337 proveedores, 27 segundos.**
+Medido en producción: **~18.800 cotizaciones y ~3.500 proveedores, en 27 segundos.**
+
+Los números redondos son a propósito: el catálogo se mueve, y una cifra exacta en
+un documento envejece en una semana. Acá decía "337 proveedores" —el número de
+cuando el maestro se derivaba de las cotizaciones— y quedó diez veces corto
+cuando entró la consulta de terceros. Para el dato de hoy:
+`node scripts/verificar-006-007.js`.
 
 **Archivos:** `services/snapshot.service.js`, `services/normalizarCotizacion.js`,
 `services/maestro.service.js`.
@@ -262,9 +268,15 @@ IP y la huella SHA-256 del contenido firmado.
 Desde ahí:
 
 ```
-POST /api/admin/solicitudes/:id/aprobar
-POST /api/admin/solicitudes/:id/rechazar     (con motivo)
+POST /api/admin/solicitudes/lineas/aprobar     { lineaIds: [...] }
+POST /api/admin/solicitudes/lineas/rechazar    { lineaIds: [...], motivo }
+POST /api/admin/solicitudes/lineas/reintentar  { lineaIds: [...] }
 ```
+
+**Reciben LÍNEAS, no una solicitud.** Aprobar el paquete entero es mandarle todas
+sus líneas; aprobar una es mandarle una. La API no distingue los dos casos —por
+eso la pantalla puede ser flexible sin lógica de más— y el id de la solicitud no
+va en la ruta, porque un lote puede tocar líneas de solicitudes distintas.
 
 ### 3.6 Al aprobar: se escribe en SIESA
 
@@ -319,13 +331,20 @@ src/
     formatoSiesa.js         anchos fijos y fechas sin new Date()
     siesaCotizacion.js      arma los tres bloques y hace el POST
     snapshot.service.js     el cron del catálogo
-    maestro.service.js      pp_proveedores + pp_cuentas  ← fuente provisional
-    solicitud.service.js    crear / aprobar / rechazar
-    firma.service.js        hash canónico y verificación
+    maestro.service.js      pp_proveedores + pp_cuentas, del maestro REAL de SIESA
+    grupos.service.js       sucursales hermanas: a quién más se replica
+    solicitud.service.js    crear / aprobar / rechazar, por LÍNEA
+    firma.service.js        hash canónico del PAQUETE y verificación
+    verificarCotizacion.js  relee SIESA después de escribir
+    revalidarTope.js        ¿la marca que el admin mira sigue siendo cierta?
+    codigosBarras.service.js  el código impreso en la caja, para el buscador
     invitacion.service.js   token de un solo uso, 72 h
     email.service.js        SMTP con modo prueba
+    notificacion.service.js le avisa al PROVEEDOR cómo terminó
+    compras.service.js      le avisa a COMPRAS que entró una solicitud
   controllers/  routes/  server.js
 sql/            001_create_tables · 002_moneda · 003_admins · 004_verificacion
+                005_anulada · 006_agrupadas · 007_grupos · 008_drop_vieja
                 005_anulada · 006_solicitudes_agrupadas · 007_grupos_sucursal
                 008_drop_solicitudes_precio
 ```

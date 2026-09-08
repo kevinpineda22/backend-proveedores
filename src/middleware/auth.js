@@ -15,7 +15,9 @@
    ============================================================================= */
 
 import { supabase } from "../config/supabase.js";
+import { topeDe } from "../services/costoNeto.js";
 import { createError } from "./errorHandler.js";
+import { auditar } from "../services/auditoria.js";
 
 /* ── Piezas puras (testeables sin Express ni Supabase) ───────────────────── */
 
@@ -87,23 +89,19 @@ export function motivoDeBloqueo(cuenta) {
  * el acceso se concedió.
  */
 async function registrarSuplantacion({ userId, cuentaId, intento, req }) {
-  try {
-    await supabase.from("pp_auditoria").insert({
-      entidad: "pp_cuentas",
-      entidad_id: String(cuentaId),
-      accion: "suplantacion_bloqueada",
-      actor_user_id: userId,
-      actor_rol: "pp_proveedor",
-      detalle: {
-        clave: intento.clave,
-        valor_recibido: String(intento.valor).slice(0, 100),
-        ruta: `${req.method} ${req.originalUrl}`,
-      },
-      ip: req.ip,
-    });
-  } catch (e) {
-    console.error("[auth] no se pudo registrar el intento de suplantación:", e?.message);
-  }
+  await auditar({
+    entidad: "pp_cuentas",
+    entidadId: cuentaId,
+    accion: "suplantacion_bloqueada",
+    actorUserId: userId,
+    actorRol: "pp_proveedor",
+    detalle: {
+      clave: intento.clave,
+      valor_recibido: String(intento.valor).slice(0, 100),
+      ruta: `${req.method} ${req.originalUrl}`,
+    },
+    ip: req.ip,
+  });
 }
 
 /* ── Middlewares ─────────────────────────────────────────────────────────── */
@@ -134,7 +132,10 @@ export async function requiereProveedor(req, res, next) {
 
     const { data: cuenta, error } = await supabase
       .from("pp_cuentas")
-      .select("id, nit, sucursal, nombre_sucursal, estado, pp_proveedores(id_tercero, razon_social, porcentaje_max, bloqueado)")
+      .select(
+        "id, nit, sucursal, nombre_sucursal, estado, porcentaje_max, " +
+          "pp_proveedores(id_tercero, razon_social, porcentaje_max, bloqueado)",
+      )
       .eq("user_id", usuario.id)
       .maybeSingle();
 
@@ -158,10 +159,18 @@ export async function requiereProveedor(req, res, next) {
       nombreSucursal: cuenta.nombre_sucursal,
       idTercero: proveedor.id_tercero,
       razonSocial: proveedor.razon_social,
-      // El tope viaja para que el servicio lo aplique. NO se serializa al cliente
-      // salvo dentro del 422 que lo choca: ahí sí, con el número exacto, porque
-      // es el momento en que el proveedor necesita saber a qué atenerse.
-      porcentajeMax: proveedor.porcentaje_max,
+      /* El tope viaja para que el servicio lo aplique. NO se serializa al cliente
+         salvo dentro del aviso que lo choca: ahí sí, con el número exacto, porque
+         es el momento en que el proveedor necesita saber a qué atenerse.
+
+         Desde la migración 009 el tope es POR SUCURSAL, con el del NIT como
+         valor por defecto. La resolución se hace en `topeDe()` y no acá con un
+         `||`: el 0 es un tope legítimo —"ninguna subida"— y es falsy, así que un
+         `||` le devolvería el tope del NIT a una sucursal congelada a propósito. */
+      porcentajeMax: topeDe(
+        { porcentajeMax: cuenta.porcentaje_max },
+        { porcentajeMax: proveedor.porcentaje_max },
+      ),
       bloqueado: Boolean(proveedor.bloqueado),
     };
 

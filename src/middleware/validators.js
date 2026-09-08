@@ -116,13 +116,12 @@ export const esquemas = {
       .max(1000),
   }),
 
-  /** POST /api/admin/solicitudes/:id/rechazar */
-  rechazar: z.object({
-    motivo: z
-      .string()
-      .trim()
-      .min(10, "Explique el motivo del rechazo (mínimo 10 caracteres)")
-      .max(1000),
+  /** PATCH /api/admin/cuentas/:id — el tope de UNA sucursal (migración 009) */
+  configurarCuenta: z.object({
+    /* `null` acá es HEREDAR el tope del NIT, no "sin tope". Se acepta explícito
+       para que borrar el tope de una sucursal sea una decisión y no el efecto de
+       omitir un campo. */
+    porcentajeMax: z.number().min(0).max(1000).nullable(),
   }),
 
   /** PATCH /api/admin/proveedores/:nit */

@@ -1,4 +1,5 @@
 import { supabase } from "../config/supabase.js";
+import { auditar } from "../services/auditoria.js";
 import { createError } from "../middleware/errorHandler.js";
 import {
   aprobarLineas,
@@ -15,7 +16,13 @@ export async function maestro(req, res, next) {
   try {
     const { data, error } = await supabase
       .from("pp_proveedores")
-      .select("nit, id_tercero, razon_social, porcentaje_max, bloqueado, pp_cuentas(id, sucursal, nombre_sucursal, correo_notificacion, estado)")
+      /* `pp_cuentas.porcentaje_max` viaja desde la migración 009: el tope es por
+         sucursal, y sin este campo la pantalla no puede mostrar cuál de las diez
+         sucursales de un NIT tiene el suyo y cuál hereda. */
+      .select(
+        "nit, id_tercero, razon_social, porcentaje_max, bloqueado, " +
+          "pp_cuentas(id, sucursal, nombre_sucursal, correo_notificacion, estado, porcentaje_max)",
+      )
       .order("razon_social");
 
     if (error) throw new Error(error.message);
@@ -51,12 +58,12 @@ export async function configurarProveedor(req, res, next) {
 
     // El tope decide cuánta plata entra de más: cada cambio queda registrado con
     // el valor anterior, no solo el nuevo.
-    await supabase.from("pp_auditoria").insert({
+    await auditar({
       entidad: "pp_proveedores",
-      entidad_id: req.params.nit,
+      entidadId: req.params.nit,
       accion: "configurar",
-      actor_user_id: req.admin.userId,
-      actor_rol: "pp_admin",
+      actorUserId: req.admin.userId,
+      actorRol: "pp_admin",
       detalle: { antes, despues: cambios },
       ip: req.ip,
     });
@@ -357,14 +364,14 @@ export async function agregarAdmin(req, res, next) {
 
     if (error) throw new Error(error.message);
 
-    await supabase.from("pp_auditoria").insert({
+    await auditar({
       entidad: "pp_admins",
-      entidad_id: perfil.user_id,
+      entidadId: perfil.user_id,
       accion: previo ? "reactivar" : "agregar",
-      estado_anterior: previo ? "inactivo" : null,
-      estado_nuevo: "activo",
-      actor_user_id: req.admin.userId,
-      actor_rol: "pp_admin",
+      estadoAnterior: previo ? "inactivo" : null,
+      estadoNuevo: "activo",
+      actorUserId: req.admin.userId,
+      actorRol: "pp_admin",
       detalle: { correo: perfil.correo ?? correo, nombre: perfil.nombre },
       ip: req.ip,
     });
@@ -412,14 +419,14 @@ export async function cambiarEstadoAdmin(req, res, next) {
     const { error } = await supabase.from("pp_admins").update({ activo }).eq("user_id", userId);
     if (error) throw new Error(error.message);
 
-    await supabase.from("pp_auditoria").insert({
+    await auditar({
       entidad: "pp_admins",
-      entidad_id: userId,
+      entidadId: userId,
       accion: activo ? "reactivar" : "desactivar",
-      estado_anterior: fila.activo ? "activo" : "inactivo",
-      estado_nuevo: activo ? "activo" : "inactivo",
-      actor_user_id: req.admin.userId,
-      actor_rol: "pp_admin",
+      estadoAnterior: fila.activo ? "activo" : "inactivo",
+      estadoNuevo: activo ? "activo" : "inactivo",
+      actorUserId: req.admin.userId,
+      actorRol: "pp_admin",
       detalle: { nombre: fila.nombre, correo: fila.correo, seDesactivoASiMismo: userId === req.admin.userId },
       ip: req.ip,
     });
@@ -434,6 +441,70 @@ export async function cambiarEstadoAdmin(req, res, next) {
 export async function reintentarSolicitud(req, res, next) {
   try {
     res.json(await reintentar({ lineaIds: req.body.lineaIds, admin: req.admin, ip: req.ip }));
+  } catch (e) {
+    next(e);
+  }
+}
+
+/**
+ * El tope de UNA sucursal (migración 009).
+ *
+ * Compras decidió el 2026-09-07 que el tope es por sucursal. `ZONA 2
+ * DISTRIBUCIONES SAS` tiene diez —cinco marcas por dos zonas de entrega— y hasta
+ * ahora las diez compartían el máximo del NIT: no había forma de reflejar un
+ * acuerdo distinto por marca sin aflojarle el tope a todas.
+ *
+ * ⚠️ ACÁ `null` SIGNIFICA OTRA COSA que en `configurarProveedor`.
+ *
+ *     en pp_proveedores → null = SIN TOPE
+ *     en pp_cuentas     → null = HEREDA el del NIT
+ *
+ * Son dos verbos distintos con la misma palabra, y es el error fácil de cometer:
+ * un admin que "saca el tope" de una sucursal esperando dejarla sin límite le
+ * está devolviendo el del NIT. La resolución vive en `topeDe()`; acá solo se
+ * guarda, y la pantalla es la que tiene que decirlo con todas las letras.
+ */
+export async function configurarCuenta(req, res, next) {
+  try {
+    if (!("porcentajeMax" in req.body)) {
+      throw createError(422, "No se envió ningún cambio");
+    }
+
+    const { data: antes } = await supabase
+      .from("pp_cuentas")
+      .select("id, nit, sucursal, nombre_sucursal, porcentaje_max")
+      .eq("id", req.params.id)
+      .maybeSingle();
+
+    if (!antes) throw createError(404, "La sucursal no existe");
+
+    const { error } = await supabase
+      .from("pp_cuentas")
+      .update({ porcentaje_max: req.body.porcentajeMax })
+      .eq("id", req.params.id);
+    if (error) throw new Error(error.message);
+
+    /* El tope decide cuánta plata entra de más: queda el valor ANTERIOR, no solo
+       el nuevo. Sin el anterior, la auditoría dice qué quedó pero no qué se
+       cambió, y la pregunta que se hace después de un aumento raro es siempre la
+       segunda. */
+    await auditar({
+      entidad: "pp_cuentas",
+      entidadId: req.params.id,
+      accion: "configurar_tope_sucursal",
+      actorUserId: req.admin.userId,
+      actorRol: "pp_admin",
+      detalle: {
+        nit: antes.nit,
+        sucursal: antes.sucursal,
+        nombreSucursal: antes.nombre_sucursal,
+        antes: antes.porcentaje_max,
+        despues: req.body.porcentajeMax,
+      },
+      ip: req.ip,
+    });
+
+    res.json({ id: Number(req.params.id), porcentajeMax: req.body.porcentajeMax });
   } catch (e) {
     next(e);
   }

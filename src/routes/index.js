@@ -103,6 +103,8 @@ rAdmin.get("/admins", admin.listarAdmins);
 rAdmin.post("/admins", validar(esquemas.agregarAdmin), admin.agregarAdmin);
 rAdmin.patch("/admins/:userId", validar(esquemas.cambiarEstadoAdmin), admin.cambiarEstadoAdmin);
 
+rAdmin.patch("/cuentas/:id", validar(esquemas.configurarCuenta), admin.configurarCuenta);
+
 rAdmin.get("/solicitudes", admin.bandeja);
 rAdmin.get("/firmas/:id", admin.verFirma);
 

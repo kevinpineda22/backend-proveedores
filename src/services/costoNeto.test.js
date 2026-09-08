@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { costoNeto, variacion, evaluarPropuesta, excedeTope } from "./costoNeto.js";
+import { costoNeto, variacion, evaluarPropuesta, excedeTope, topeDe } from "./costoNeto.js";
 
 /* ── costoNeto ────────────────────────────────────────────────────────────── */
 
@@ -231,4 +231,38 @@ test("cascada confirmada contra SIESA: JABON PROTEX con 4% y 25%", () => {
   // Y el modo aditivo NO llega a ese número: 9524.15 × 0,71 × 5 = 33.810,73.
   // Se deja escrito para que se vea la distancia — son 476 pesos en UN renglón.
   assert.notEqual(Math.round(9524.15 * 0.71 * 5), 34287);
+});
+
+/* ── topeDe: el tope por sucursal (migración 009) ──────────────────────────── */
+
+test("el tope de la SUCURSAL manda sobre el del NIT", () => {
+  assert.equal(topeDe({ porcentajeMax: 3 }, { porcentajeMax: 10 }), 3);
+});
+
+test("sin tope propio, hereda el del NIT", () => {
+  assert.equal(topeDe({ porcentajeMax: null }, { porcentajeMax: 10 }), 10);
+  assert.equal(topeDe({}, { porcentajeMax: 10 }), 10);
+});
+
+test("un CERO en la sucursal es un tope real, no una ausencia", () => {
+  // Es el caso que rompe con `||`: 0 es falsy, y un `||` le devolvería el 10 del
+  // NIT a una sucursal que Merkahorro congeló a propósito. La diferencia es
+  // "ningún aumento" contra "hasta 10 %".
+  assert.equal(topeDe({ porcentajeMax: 0 }, { porcentajeMax: 10 }), 0);
+});
+
+test("un CERO en el NIT también, cuando la sucursal no tiene el suyo", () => {
+  assert.equal(topeDe({ porcentajeMax: null }, { porcentajeMax: 0 }), 0);
+});
+
+test("sin tope en ninguno de los dos es SIN TOPE, no cero", () => {
+  // NULL y 0 no son lo mismo: NULL deja pasar todo, 0 no deja pasar nada.
+  assert.equal(topeDe({}, {}), null);
+  assert.equal(topeDe({ porcentajeMax: null }, { porcentajeMax: null }), null);
+});
+
+test("aguanta que falte la cuenta o el proveedor", () => {
+  assert.equal(topeDe(null, { porcentajeMax: 7 }), 7);
+  assert.equal(topeDe({ porcentajeMax: 7 }, null), 7);
+  assert.equal(topeDe(null, null), null);
 });

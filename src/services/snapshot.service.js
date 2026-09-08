@@ -11,6 +11,7 @@ import { supabase } from "../config/supabase.js";
 import { consultarCotizaciones } from "../config/connekta.js";
 import { agruparCotizaciones } from "./normalizarCotizacion.js";
 import { sincronizarMaestro } from "./maestro.service.js";
+import { auditar } from "./auditoria.js";
 
 /** Supabase no traga un upsert de 60.000 filas de una. */
 const LOTE = 1000;
@@ -191,14 +192,10 @@ export async function sincronizar() {
 
 /** Deja constancia de la corrida. Nunca lanza: el snapshot ya salió bien. */
 async function registrar(resultado) {
-  try {
-    await supabase.from("pp_auditoria").insert({
-      entidad: "pp_cotizaciones",
-      accion: "snapshot",
-      actor_rol: "cron",
-      detalle: resultado,
-    });
-  } catch (e) {
-    console.error("[snapshot] no se pudo registrar la corrida:", e?.message);
-  }
+  await auditar({
+    entidad: "pp_cotizaciones",
+    accion: "snapshot",
+    actorRol: "cron",
+    detalle: resultado,
+  });
 }

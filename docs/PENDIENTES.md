@@ -45,9 +45,13 @@ Los otros no se pisan con este ni entre ellos:
 ⚠️ **Antes de prender §1.4**, decidir qué pasa con las dos cuentas de prueba de
 Altipal, que siguen activas. Ver §4.
 
-⚠️ **Nada de esto está subido.** `git status` en los dos repos tiene trabajo sin
-commitear, incluida la feature de paquete del frontend entera. Vercel corre la
-rama subida: el portal desplegado NO tiene nada de lo del 2026-09-07. Ver §3.
+✅ **Todo subido** (verificado el 2026-09-07): los dos repos limpios y en sincronía
+con su remoto, y la rama `Johan` del frontend sin commits que master no tenga.
+
+> Acá decía *"nada de esto está subido"*. Duró un día — y es exactamente lo que
+> §3 advierte que no hay que escribir: **una afirmación sobre `git status` en un
+> documento tiene garantizado mentir.** Se deja el renglón como recordatorio, no
+> como dato: para saber qué falta subir, `git status`. Nada más.
 
 ### 0. La migración `008` · ✅ **CORRIDA (2026-09-07)**
 
@@ -488,7 +492,10 @@ Es el pedido correcto, y por una razón que ya estaba escrita en la cabecera de
 El número grande, el que uno mira, se queda igual — y Merkahorro pasa a pagar
 más. Es el cambio más caro que se puede hacer sin darse cuenta.
 
-**Del lado del proveedor** (`EditarPrecioModal.jsx`):
+**Del lado del proveedor** — se implementó en `EditarPrecioModal.jsx`, que se
+borró el 2026-09-06 al sacar los modales. **El comportamiento no se perdió: se
+mudó** a `components/FilaCotizacion.jsx` (el editor dentro de la fila), y ahí
+además cubre los IMPUESTOS, que antes no se podían tocar:
 
 - Al vaciar un descuento aparece un aviso que dice cuál se elimina y **cuánto
   pasa a pagar Merkahorro en pesos** — el porcentaje es abstracto, la plata no.

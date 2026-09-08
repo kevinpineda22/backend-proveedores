@@ -253,11 +253,20 @@ test("recuperación activa invalida anteriores, guarda solo el hash y audita", a
   assert.equal(correos.length, 1);
   assert.equal(correos[0].para, CUENTA_ACTIVA.correo_notificacion);
   assert.match(correos[0].texto, new RegExp(`activar\\?token=${token}`));
+  /* Los tres `null` explícitos los agrega `auditar()` (services/auditoria.js), que
+     escribe SIEMPRE la fila completa. Antes este insert omitía las columnas y la
+     base les ponía su default, que es el mismo null: la fila guardada no cambió,
+     solo se hizo explícita. Se dejan en la afirmación en vez de aflojarla a
+     `deepInclude`, porque lo que este test cuida es que la auditoría de una ruta
+     PÚBLICA no acumule de más — y para eso hay que mirar el objeto entero. */
   assert.deepEqual(llamadas.auditorias, [
     {
       entidad: "pp_cuentas",
       entidad_id: "17",
       accion: "recuperar_clave",
+      estado_anterior: null,
+      estado_nuevo: null,
+      actor_user_id: null,
       actor_rol: "pp_proveedor",
       detalle: { correoEnviado: true, motivo: null },
       ip: "192.0.2.10",
@@ -379,7 +388,13 @@ test("un fallo de auditoría se reporta sin provocar un segundo correo", async (
 
   assert.deepEqual(resultado, { ok: true });
   assert.equal(errores.length, 1);
-  assert.match(errores[0], /cuenta 17: tabla bloqueada/);
+  /* El mensaje lo arma ahora `auditar()` (services/auditoria.js), que es el único
+     lugar donde se escribe en `pp_auditoria`. Se afirma que identifique QUÉ no se
+     registró —entidad, id y acción— y no solo que algo falló: un log que dice
+     "error" sin decir de qué obliga a adivinar justo cuando falta el rastro. */
+  assert.match(errores[0], /pp_cuentas\/17/);
+  assert.match(errores[0], /recuperar_clave/);
+  assert.match(errores[0], /tabla bloqueada/);
 });
 
 /* ── Freno por cuenta ─────────────────────────────────────────────────────────

@@ -4,116 +4,25 @@
 > escribe el código. Si el código y este documento no coinciden, uno de los dos
 > está mal — y hay que arreglarlo, no ignorarlo.
 
-Estado: **implementado y desplegado en producción** (2026-08-27).
-
 El contrato exacto con SIESA (consultas, conector, formatos, riesgos) vive en
 **[CONTRATO-SIESA.md](./CONTRATO-SIESA.md)**. Leerlo junto con este.
 
-Bloqueado por:
-- Consulta de **terceros** SIESA (falta) — el maestro se deriva provisionalmente
-  de las cotizaciones, así que un proveedor sin precios cargados no aparece.
-- La **primera aprobación real** contra SIESA, nunca ejecutada.
-
-Ya NO bloquea:
-- ~~Prueba en QA del riesgo de impuestos/descuentos huérfanos~~ — **confirmado
-  con datos de producción**, sin necesidad de QA: el propio histórico de SIESA
-  mostró un ICO de $5.102 que desapareció al cambiar de fecha. La re-emisión de
-  los tres bloques es obligatoria y está implementada. Ver CONTRATO-SIESA §3.
-
-### Desplegado en producción (2026-08-27)
-
-`https://backend-proveedores.vercel.app` — verificado de punta a punta:
-
-| Chequeo | Resultado |
-|---|---|
-| `/api/salud` | 200 |
-| `/api/publico/sucursales?nit=800186960` | 200 — devuelve la sucursal 006 |
-| `/api/proveedor/catalogo` sin token | 401 |
-| `/api/cron/snapshot` sin secreto | 401 |
-| CORS desde `localhost:5173` y `merkahorro.com` | permitido |
-| CORS desde otro origen | **sin** `Access-Control-Allow-Origin` |
-| Snapshot completo | **27 s**, 18.866 cotizaciones, 337 proveedores |
-
-Los 27 segundos importan: `vercel.json` da 300 de `maxDuration`, así que el cron
-de las 10:00 UTC (5:00 Colombia) tiene margen de sobra aun si SIESA se pone lenta.
-
-#### Variables en Vercel
-
-```
-SUPABASE_URL · SUPABASE_SERVICE_KEY · CONNI_KEY · CONNI_TOKEN · CRON_SECRET
-SIESA_CONSULTA_COTIZACIONES=merkahorro_cotizaciones_dev_2
-CORS_ORIGENES=https://merkahorro.com,http://localhost:5173
-PORTAL_PROVEEDORES_URL=http://localhost:5173/portal-proveedores   ← provisional
-PROVEEDORES_SANDBOX=true                                          ← provisional
-```
-
-**`PORTAL_PROVEEDORES_URL` apunta a localhost a propósito**: el frontend todavía
-no está desplegado, así que ese ES el lugar donde vive el portal hoy. El día que
-suba, se cambia.
-
-Mientras tanto, `enlaceEsLocal()` lo detecta y el panel avisa al invitar: *"la
-cuenta quedó invitada, pero el enlace apunta a una dirección local y NO le va a
-funcionar al proveedor"*. Sin ese aviso, Merkahorro invitaría a un proveedor real, el
-correo saldría perfecto, y nadie se enteraría hasta que el proveedor llame.
-
-#### CSP: no hubo que tocarlo
-
-`public/.htaccess` tiene hoy `connect-src *`, y la versión endurecida que está
-preparada para la Fase 3 ya incluye `https://*.vercel.app` — el dominio nuevo
-entra por ese comodín. Checklist de `CSP_MIGRATION_GUIDE.md` §5 cumplido sin
-cambios.
-
----
-
-### Estado de implementación
-
-Actualizado 2026-08-27. `npm test` → **142 pruebas, 142 pasan.**
-
-Migraciones: `001` ✅ · `002` ✅ — las dos ejecutadas.
-
-Consulta SIESA: ✅ `merkahorro_cotizaciones_dev_2` cargada y en uso.
-
-**Snapshot corriendo contra datos reales (2026-08-27):**
-
-```
-18.960 crudas → 18.866 cotizaciones · 0 descartadas · 27,7 s
-barrido: 3.651 borradas (el histórico muerto, exacto)
-337 proveedores · solo COP · 134 con precio futuro cargado
-```
-
-`pp_cotizaciones` tiene 18.866 filas y ninguna anterior a 2020. El catálogo del
-portal está poblado.
-
-| Módulo | Estado | Qué resuelve |
-|---|---|---|
-| `services/costoNeto.js` | ✅ 16 tests | Tope % sobre costo neto (§6) |
-| `services/formatoSiesa.js` | ✅ 16 tests | Anchos fijos del conector, fechas sin `Date` |
-| `services/normalizarCotizacion.js` | ✅ 21 tests | Relleno CHAR, pivote de descuentos, ICO/IBUA, vigente vs. programada |
-| `services/siesaCotizacion.js` | ✅ 17 tests | Armado de los tres bloques, re-emisión de impuestos, POST al conector |
-| `services/snapshot.service.js` | ✅ 11 tests | Cron consulta → `pp_cotizaciones`, con válvula de barrido |
-| `services/firma.service.js` | ✅ 17 tests | `payload_hash` canónico, verificación previa a aprobar (§8) |
-| `sql/001_create_tables.sql` | ✅ **ejecutada** | Tablas `pp_*`, RLS, append-only por trigger |
-| `middleware/auth.js` | ✅ 14 tests | JWT → `cuenta_id`, suplantación, estados de cuenta (§5) |
-| `middleware/errorHandler.js` | ✅ | 5xx sin filtrar internals; 4xx con mensaje accionable |
-| `config/supabase.js` `config/connekta.js` | ✅ | Service-key; consulta sin paginación con reintentos |
-| `vercel.json` | ✅ | Cron del snapshot, 10:00 UTC = 5:00 Colombia |
-| `services/solicitud.service.js` | ✅ | Crear / aprobar / rechazar + empuje idempotente |
-| `services/maestro.service.js` | ✅ 7 tests | `pp_proveedores` + `pp_cuentas` — **fuente provisional** |
-| `services/invitacion.service.js` | ✅ 5 tests | Token de un solo uso, 72 h. Los tests cubren el aviso de enlace local (§3.4) |
-| `services/email.service.js` | ✅ | SMTP con modo prueba |
-| `services/emailSintetico.js` | ✅ 10 tests | Gemelo del front |
-| `middleware/validators.js` | ✅ | Zod en todo lo que entra |
-| `middleware/rateLimit.js` | ✅ | Lomo de burro del endpoint público |
-| `controllers/` `routes/` `server.js` | ✅ **en producción** | API completa. Falta solo el ABM de `pp_admins` |
-| Front `utils/emailSintetico.js` | ✅ 10 tests | Gemelo del backend |
-| Front `utils/costoNeto.js` | ✅ 16 tests | Vista previa del tope |
-| Front `LoginProveedor.jsx` | ✅ probado | NIT → sucursal → contraseña |
-| Front `ActivarCuenta.jsx` | ✅ | Destino del enlace de invitación |
-| Front `AdminPanel.jsx` + `PerfilProveedor` | ✅ | Maestro, correo y tope |
-| Front `utils/fechas.js` | ✅ 6 tests | `hoyEnColombia`, formato sin `Date` |
-| Front `ProveedorPanel.jsx` | ✅ probado | Catálogo, solicitudes, cierre de sesión |
-| Front `EditarPrecioModal.jsx` | ✅ probado | Propuesta + costo neto en vivo + firma |
-| Front `BandejaAprobaciones.jsx` | ✅ | Aprobar / rechazar, montada en `AdminPanel.jsx` |
+> ## 📍 El ESTADO no vive acá
+>
+> Qué está hecho, qué falta, cuántas pruebas pasan, qué migraciones se corrieron y
+> qué datos hay en la base: **todo eso es de [PENDIENTES.md](./PENDIENTES.md)**.
+>
+> Acá había 110 líneas que lo repetían —una tabla de módulos con conteos de tests,
+> el estado de las migraciones, qué estaba desplegado— y **se pudrieron todas**.
+> Llegaron a decir que faltaba la consulta de terceros (cerrada el 2026-09-01), que
+> la primera aprobación real nunca se había ejecutado (hecha el 2026-08-27), que
+> había 142 pruebas (hay 300) y que existía un `EditarPrecioModal.jsx` que se
+> borró hace días.
+>
+> No se actualizaron: **se sacaron**. Un dato de estado en dos documentos se
+> contradice solo, y el que lo lee no tiene forma de saber cuál miente. Este
+> archivo es dueño del **porqué** — las decisiones y sus razones, que no cambian
+> cada semana.
 
 ### Rutas del frontend
 
@@ -160,16 +69,20 @@ día se adopta, se adopta para todo el `src/`.
 |---|---|---|
 | GET | `/api/salud` | público |
 | GET | `/api/publico/sucursales?nit=` | público (rate-limited) |
+| POST | `/api/publico/activar` | público, con token de invitación |
 | GET | `/api/proveedor/cuenta` | proveedor |
 | GET | `/api/proveedor/catalogo` | proveedor |
 | GET | `/api/proveedor/solicitudes` | proveedor |
 | POST | `/api/proveedor/solicitudes` | proveedor (no bloqueado) |
+| POST | `/api/proveedor/solicitudes/:id/anular` | proveedor (la suya, y solo pendiente) |
 | GET | `/api/admin/proveedores` | admin |
 | PATCH | `/api/admin/proveedores/:nit` | admin |
+| POST | `/api/admin/cuentas/:id/invitar` | admin |
 | GET | `/api/admin/solicitudes?estado=` | admin |
 | GET | `/api/admin/firmas/:id` | admin |
-| POST | `/api/admin/solicitudes/:id/aprobar` | admin |
-| POST | `/api/admin/solicitudes/:id/rechazar` | admin |
+| POST | `/api/admin/solicitudes/lineas/aprobar` | admin |
+| POST | `/api/admin/solicitudes/lineas/rechazar` | admin |
+| POST | `/api/admin/solicitudes/lineas/reintentar` | admin |
 | GET | `/api/admin/admins` | admin |
 | POST | `/api/admin/admins` | admin |
 | PATCH | `/api/admin/admins/:userId` | admin |
@@ -720,17 +633,33 @@ ya está resuelto y probado en producción.
 
 ```
 LoginProveedor.jsx        NIT → sucursal → contraseña
-AdminPanel.jsx            maestro + bandeja de aprobaciones
-ProveedorPanel.jsx        cotizaciones + mis solicitudes
+ActivarCuenta.jsx         destino del enlace de invitación
+AdminPanel.jsx            maestro + bandeja + administradores
+ProveedorPanel.jsx        catálogo, paquete en armado, mis solicitudes
 components/
-  MaestroProveedores.jsx  PerfilProveedor.jsx    (asociar correo, tope %)
-  TablaCotizaciones.jsx   EditarPrecioModal.jsx
-  BandejaAprobaciones.jsx DetalleSolicitud.jsx   FirmaModal.jsx
-hooks/     usePortalProveedores.js  useCotizaciones.js  useSolicitudes.js
+  InicioProveedor.jsx     resumen de entrada
+  FilaCotizacion.jsx      el renglón, EDITABLE EN EL LUGAR (reemplazó al modal)
+  DescuentoMasivo.jsx     un % y una fecha para varios productos
+  BarraPaquete.jsx        barra fija: cuántos van y el paso a la firma
+  FirmarPaquete.jsx       resumen del paquete + UNA firma
+  BandejaAprobaciones.jsx aprobar / rechazar por línea, y en lote
+  PerfilProveedor.jsx     correo y tope %       AdminsPortal.jsx  ABM de pp_admins
+  PortalLayout.jsx        sidebar plegable, compartido por los dos paneles
+  Paginacion.jsx  Cargando.jsx  AccesoIncorrecto.jsx
+hooks/     useCatalogo · useAprobaciones · useMaestro · useAdmins
+           useBorrador  ← el paquete a medio armar, en localStorage
+           reintentos.js
 services/  portalProveedoresApi.js
-utils/     variacionPrecio.js(+test)  estadoSolicitud.js(+test)  emailSintetico.js(+test)
-styles/
+utils/     costoNeto · borrador · bandeja · cambiosDescuentos · buscarCatalogo
+           exportarBandeja · fechas · paginacion · resumenProveedor · emailSintetico
+           (los diez con test propio)
+styles/    pp-shared.css
 ```
+
+⚠️ **Este árbol se escribe mirando la carpeta, no de memoria.** El que estaba
+antes listaba diez archivos que no existían —`TablaCotizaciones.jsx`,
+`DetalleSolicitud.jsx`, `FirmaModal.jsx`, `useCotizaciones.js`…— y mandaba a
+buscar cosas que nunca se escribieron.
 
 JSX plano, un `.css` por componente, prefijo `pp-`, modificadores con `--`.
 Igual que el resto de la app. **No se introduce stack nuevo.**

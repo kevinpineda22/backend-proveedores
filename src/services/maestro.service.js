@@ -28,6 +28,7 @@
 import { supabase } from "../config/supabase.js";
 import { consultaTerceros, consultarTerceros } from "../config/connekta.js";
 import { ciaDominante } from "./normalizarCotizacion.js";
+import { auditar } from "./auditoria.js";
 
 /**
  * Extrae proveedores y sucursales únicos de cotizaciones YA NORMALIZADAS.
@@ -281,16 +282,12 @@ export async function sincronizarMaestro(cotizaciones = []) {
     duracionMs: Date.now() - inicio,
   };
 
-  try {
-    await supabase.from("pp_auditoria").insert({
-      entidad: "pp_proveedores",
-      accion: "sincronizar_maestro",
-      actor_rol: "cron",
-      detalle: { ...resultado, fuente },
-    });
-  } catch (e) {
-    console.error("[maestro] no se pudo registrar la corrida:", e?.message);
-  }
+  await auditar({
+    entidad: "pp_proveedores",
+    accion: "sincronizar_maestro",
+    actorRol: "cron",
+    detalle: { ...resultado, fuente },
+  });
 
   return resultado;
 }
