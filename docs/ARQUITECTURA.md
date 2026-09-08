@@ -252,7 +252,7 @@ queda descartada.
 pp_proveedores          espejo local del maestro de terceros de SIESA
   nit                   PK
   razon_social
-  porcentaje_max        NUMERIC(5,2)  ← el tope de subida. NULL = sin tope
+  porcentaje_max        NUMERIC(5,2)  ← el tope POR DEFECTO del NIT. NULL = sin tope
   bloqueado             BOOLEAN
   actualizado_at
 
@@ -262,6 +262,10 @@ pp_cuentas              una fila por sucursal habilitada
   sucursal
   nombre_sucursal
   correo_notificacion   ← el correo REAL, solo para avisos
+  porcentaje_max        NUMERIC(5,2)  ← 009: el tope de ESTA sucursal. NULL =
+                                        hereda el del NIT SI ninguna hermana
+                                        tiene el suyo; si alguna lo tiene, es
+                                        SIN TOPE. Ver §5 y PENDIENTES §2.2
   user_id               FK → auth.users  (el email sintético)
   estado                'sin_invitar' | 'invitado' | 'activo' | 'suspendido'
   UNIQUE (nit, sucursal)
@@ -524,6 +528,18 @@ Reglas:
 - **Solo aplica a subidas.** Una baja de costo nos favorece: no se bloquea.
 - **`porcentaje_max = NULL` significa sin tope**, no 0%. Un 0 mal interpretado
   congelaría a todos los proveedores sin que nadie entienda por qué.
+- **Desde la 009 el tope es POR SUCURSAL**, y `NULL` no significa lo mismo en las
+  dos tablas: en `pp_proveedores` es "sin tope", en `pp_cuentas` **depende de las
+  hermanas**. El tope del NIT es el default de todas las sucursales o de ninguna
+  (regla de Merkahorro, 2026-09-08): mientras ninguna tenga el suyo, todas
+  heredan; en cuanto una lo tiene, las vacías quedan **sin tope**. Son tres
+  estados, no dos — `5`, `0` y `NULL` — y `topeDe()` es la única que los
+  resuelve, nunca con `||`: un `||` le devolvería el tope del NIT a una sucursal
+  congelada en `0`.
+- 🔴 **Guardar el primer tope de sucursal de un NIT le saca el tope a todas sus
+  hermanas vacías**, sin tocar esas filas. El endpoint responde por una cuenta y
+  el efecto alcanza a varias, así que quien llame a `PATCH /admin/cuentas/:id`
+  tiene que avisarlo — la pantalla pide confirmación con el número exacto.
 - Excedido → la solicitud **se crea igual**, marcada. El proveedor recibe un
   **201** con `excede: true` y el número del tope, para que sepa que se pasó en
   el momento y no tres días después con el rechazo. El admin la ve señalada.
@@ -729,9 +745,12 @@ Bloqueantes (hay que resolverlas antes de escribir el servicio de empuje):
 
 No bloqueantes (supuestos que el modelo aguanta cambiar):
 
-3. **¿El tope % es por NIT o por sucursal?** Supuesto: **por NIT**, el perfil del
-   proveedor. Se puede bajar a sucursal con una columna nullable en `pp_cuentas`
-   que pise a la del NIT.
+3. ~~**¿El tope % es por NIT o por sucursal?**~~ **RESUELTO (2026-09-07)**:
+   compras decidió **por sucursal**. La migración `009` agregó
+   `pp_cuentas.porcentaje_max`, que pisa a la del NIT. Y el 2026-09-08 se precisó
+   qué pasa con las vacías: el tope del NIT rige para todas o para ninguna — en
+   cuanto una sucursal tiene el suyo, las vacías quedan sin tope. Ver
+   PENDIENTES §2.2.
 4. **¿Varias solicitudes pendientes del mismo ítem+U.M.?** Supuesto: **no**. El
    índice único parcial de §4 lo impide; la nueva reemplaza a la anterior y deja
    rastro en auditoría.

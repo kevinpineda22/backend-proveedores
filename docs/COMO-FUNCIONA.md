@@ -246,7 +246,13 @@ marcada, y la decide un humano:
 - La **fila** de la bandeja se pinta con borde rojo.
 - El **detalle** abre con un cartel antes del comparativo.
 
-`porcentaje_max = NULL` significa **sin tope**, no 0%.
+`porcentaje_max = NULL` significa **sin tope**, no 0% — en `pp_proveedores`.
+
+En `pp_cuentas` (el tope por sucursal de la 009) el mismo NULL quiere decir otra
+cosa, y depende de las hermanas: **hereda** el del NIT mientras ninguna sucursal
+de ese NIT tenga tope propio, y queda **sin tope** en cuanto alguna lo tenga. O
+sea que cargarle un tope a UNA sucursal se lo saca a todas las vacías del NIT.
+El detalle y el porqué, en PENDIENTES §2.2.
 
 **Archivo:** `services/costoNeto.js` (y su gemelo `utils/costoNeto.js`).
 

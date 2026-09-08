@@ -28,7 +28,7 @@ El frontend vive en `Pagina-web_React/src/pages/PortalProveedores/`.
 
 ```bash
 npm install
-npm test      # 159 pruebas (backend) · 65 en el frontend
+npm test      # 310 pruebas (backend) · 210 del portal en el frontend
 npm run dev   # localhost:3000
 ```
 
@@ -93,7 +93,7 @@ avisar.
 
 ---
 
-## Las seis cosas que no hay que romper
+## Las cosas que no hay que romper
 
 Viven en **[`docs/PENDIENTES.md`](docs/PENDIENTES.md) §7**, con el dato real que
 demostró cada una.
@@ -101,3 +101,7 @@ demostró cada una.
 No se copian acá a propósito: esta lista ya estuvo duplicada en cuatro archivos y
 llegó a decir "cinco" en unos y "seis" en otros. Una regla que protege plata no
 puede tener dos versiones.
+
+**Ni el número.** Este título decía "las seis" mientras §7 ya tenía siete: al
+agregar la séptima se actualizó la lista y no su cuenta acá. Un conteo es una
+copia igual que el resto, así que se fue — la lista se cuenta sola.

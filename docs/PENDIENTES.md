@@ -20,7 +20,8 @@ Los otros no se pisan con este ni entre ellos:
 
 ## ⏳ LO QUE FALTA — leé solo esto para saber dónde estás
 
-**De código no queda nada. Lo que queda es de otros, y una migración por correr.**
+**De código no queda nada, y no queda ninguna migración por correr. Lo que
+queda es de otros — y subir el frontend.**
 
 - §1.1 consulta de terceros — ✅ cerrada el 2026-09-01
 - §1.2 ¿la solicitud #5 quedó escrita? — ✅ **QA CONFIRMÓ que sí** (2026-09-02)
@@ -37,21 +38,26 @@ Los otros no se pisan con este ni entre ellos:
 - Migración `008` — ✅ **corrida el 2026-09-07**: `pp_solicitudes_precio` ya no existe
 - §1.4 conector a producción — ⏳ una variable de entorno
 - §2.4 mirar en SIESA QA qué dejaron las pruebas del 06 — ⏳
-- §2.2 ¿el tope es por NIT o por sucursal? · §2.3 ¿y si el precio cambia en el
-  medio? — ⏳ **las dos únicas que quedan para compras**
+- §2.2 ¿el tope es por NIT o por sucursal? — ✅ **cerrada el 2026-09-07: por
+  SUCURSAL**, con el del NIT por defecto. Migración `009` corrida y verificada
+- §2.3 ¿y si el precio cambia entre la solicitud y la aprobación? — ⏳ **la única
+  que queda para compras**
 - **Grupos de sucursales hermanas (007)** — ⏳ 30 sugeridos, **0 activos**:
   esperan que compras confirme cuáles replican precio
 
 ⚠️ **Antes de prender §1.4**, decidir qué pasa con las dos cuentas de prueba de
 Altipal, que siguen activas. Ver §4.
 
-✅ **Todo subido** (verificado el 2026-09-07): los dos repos limpios y en sincronía
-con su remoto, y la rama `Johan` del frontend sin commits que master no tenga.
+> **Este documento NO dice qué está subido.** Acá hubo dos veces un renglón que lo
+> afirmaba, y las dos veces envejeció en un día: primero *"nada de esto está
+> subido"*, después *"todo subido"*. Es exactamente lo que §3 advierte: **una
+> afirmación sobre `git status` en un documento tiene garantizado mentir.** Para
+> saber qué falta subir, `git status`. Nada más.
 
-> Acá decía *"nada de esto está subido"*. Duró un día — y es exactamente lo que
-> §3 advierte que no hay que escribir: **una afirmación sobre `git status` en un
-> documento tiene garantizado mentir.** Se deja el renglón como recordatorio, no
-> como dato: para saber qué falta subir, `git status`. Nada más.
+⚠️ Lo que SÍ vale anotar, porque `git status` no lo dice: **el backend ya tiene la
+`009` desplegada y el frontend que la usa puede no estarlo.** Si `PerfilProveedor.jsx`
+no está en la rama subida, la columna existe y el `PATCH /admin/cuentas/:id`
+responde, pero **no hay pantalla para poner un tope por sucursal**. Ver §3.
 
 ### 0. La migración `008` · ✅ **CORRIDA (2026-09-07)**
 
@@ -137,12 +143,12 @@ propone y firma, el admin aprueba, y el precio se empuja al ERP.
 
 | | |
 |---|---|
-| Tests | **300** backend · **675** frontend, todos verdes (medido el 2026-09-07) |
+| Tests | **310** backend · **731** frontend, todos verdes (medido el 2026-09-08) |
 | Catálogo | 18.870 cotizaciones · **3.539 proveedores · 3.680 cuentas** |
 | Maestro | ✅ `merkahorro_terceros_dev_cotiz` — el de verdad, no el derivado, y deduplicado por `IdCia` |
 | Cuentas activas | 2 — Altipal 800186960: **006** (CATALOGO GENERAL) y **009** (BABARIA) |
 | Admins del portal | 1 |
-| Migraciones | `001` → `008`, todas corridas y verificadas contra la base |
+| Migraciones | `001` → `009`, todas corridas y verificadas contra la base |
 | Backend | `backend-proveedores.vercel.app`, escribiendo en **QA** |
 | Frontend | desplegado en `https://merkahorro.com/portal-proveedores` |
 | Entrada desde el sitio | Header → **Ingresar → Proveedores** |
@@ -745,10 +751,51 @@ agrega una, entra sola sin desplegar nada. Por eso el validador de
 `impuestosPropuestos` **no valida contra una lista cerrada**: un enum acá
 bloquearía el catálogo entero hasta que alguien toque el código.
 
-### 2.2 · ¿El tope es por NIT o por sucursal?
+### 2.2 · ✅ **CERRADO (2026-09-07)** — el tope es por SUCURSAL
 
-Hoy **por NIT**. El modelo aguanta bajarlo a sucursal con una columna nullable en
-`pp_cuentas` que pise a la del NIT. Es una decisión de negocio, no técnica.
+Decidido por compras: la unidad de acuerdo es la sucursal, no el NIT. Implementado
+en la migración `009` con una columna nullable en `pp_cuentas` que pisa a la del
+NIT, y verificado contra la base con `node scripts/verificar-009.js`.
+
+**Son TRES estados, no dos**, y la diferencia cuesta plata:
+
+| `pp_cuentas.porcentaje_max` | Qué significa |
+|---|---|
+| `5` | 5 % para ESA sucursal |
+| `0` | ninguna subida en esa sucursal — **no es "sin tope"** |
+| `NULL` | **depende de sus hermanas** — ver abajo |
+
+#### 🔴 El tope del NIT rige para TODAS las sucursales o para NINGUNA
+
+Precisado por Merkahorro el **2026-09-08**, después de correr la migración:
+
+| Estado del NIT | Qué pasa con una sucursal en `NULL` |
+|---|---|
+| ninguna sucursal tiene tope propio | **hereda** el del NIT |
+| alguna sucursal tiene tope propio | **queda SIN TOPE** |
+
+La idea es que cargar topes por sucursal es **tomar el control manual del NIT**:
+a partir de ahí, la sucursal que se dejó vacía se dejó vacía a propósito, y el
+default del NIT deja de caerle encima.
+
+⚠️ **La consecuencia es que el PRIMER tope de sucursal que se guarda le saca el
+tope a todas las hermanas vacías, en el mismo movimiento y sin tocar esas filas.**
+En un NIT de 17 sucursales, cargar uno deja 16 sin guarda. Por eso la pantalla
+pide confirmación con el número exacto antes de guardar el primero, y por eso
+`topeDe()` **recibe** el dato en vez de deducirlo: quien lo llama ya sabe si está
+en ese caso, y un cliente que no avise apaga guardas en silencio.
+
+No hizo falta migración nueva: el esquema es el mismo, cambió quién resuelve.
+La regla vive en `topeDe()` (`services/costoNeto.js`) y en su gemelo del
+frontend, en un solo lugar cada uno y con comparaciones explícitas contra
+`null` — nunca `||`, que le devolvería el tope del NIT a una sucursal congelada
+en `0`. Si esa consulta de hermanas falla, se **hereda**: el olvido cae del lado
+que protege.
+
+**No se cascadeó nada al migrar**: poner el tope del NIT no escribe en las 3.679
+cuentas. Al 2026-09-08 hay **1 NIT con tope y 0 sucursales con tope propio** —o
+sea que hoy todas heredan—, con **91 NITs de más de una sucursal** esperando que
+compras los cargue.
 
 ### 2.3 · ¿Qué pasa si el precio de SIESA cambia entre la solicitud y la aprobación?
 
