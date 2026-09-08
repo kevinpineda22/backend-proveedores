@@ -146,20 +146,26 @@ if (errorProv || errorCuentas) {
 /* ── 4. `topeDe()` resuelve lo que la pantalla promete ──────────────────────── */
 linea("\n── 4 · la resolución ────────────────────────────────────────────────");
 
-/* Casos armados a mano: los tres estados tienen que dar tres respuestas distintas.
-   Es la regla que el front repite en su propio `topeDe()`, y si se separan, la
-   pantalla promete un máximo y el servidor aplica otro. */
+/* Casos armados a mano. Es la regla que el front repite en su propio `topeDe()`,
+   y si se separan, la pantalla promete un máximo y el servidor aplica otro.
+
+   El cuarto argumento es `hayTopesPropios`: si alguna HERMANA del NIT ya tiene
+   tope propio. De él depende que el vacío de una sucursal signifique "heredá el
+   del NIT" o "sin tope" — regla de Merkahorro del 2026-09-08. */
 const casos = [
-  ["la sucursal manda sobre el NIT", { porcentajeMax: 3 }, { porcentajeMax: 8 }, 3],
-  ["sin tope propio, hereda", { porcentajeMax: null }, { porcentajeMax: 8 }, 8],
-  ["un CERO es un tope real", { porcentajeMax: 0 }, { porcentajeMax: 8 }, 0],
-  ["si el NIT tampoco tiene, no hay", { porcentajeMax: null }, { porcentajeMax: null }, null],
+  ["la sucursal manda sobre el NIT", { porcentajeMax: 3 }, { porcentajeMax: 8 }, false, 3],
+  ["sin hermanas configuradas, hereda", { porcentajeMax: null }, { porcentajeMax: 8 }, false, 8],
+  ["con una hermana configurada, NO hereda", { porcentajeMax: null }, { porcentajeMax: 8 }, true, null],
+  ["la hermana configurada conserva el suyo", { porcentajeMax: 3 }, { porcentajeMax: 8 }, true, 3],
+  ["un CERO es un tope real", { porcentajeMax: 0 }, { porcentajeMax: 8 }, false, 0],
+  ["…y sobrevive aunque el NIT ya no rija", { porcentajeMax: 0 }, { porcentajeMax: 8 }, true, 0],
+  ["si el NIT tampoco tiene, no hay", { porcentajeMax: null }, { porcentajeMax: null }, false, null],
 ];
 
-for (const [nombre, cuenta, proveedor, esperado] of casos) {
-  const dio = topeDe(cuenta, proveedor);
+for (const [nombre, cuenta, proveedor, hayTopesPropios, esperado] of casos) {
+  const dio = topeDe(cuenta, proveedor, { hayTopesPropios });
   if (dio === esperado) ok(`${nombre} → ${dio ?? "sin tope"}`);
-  else fallar(`${nombre}: esperaba ${esperado}, dio ${dio}`);
+  else fallar(`${nombre}: esperaba ${esperado ?? "sin tope"}, dio ${dio ?? "sin tope"}`);
 }
 
 /* El cero tiene que BLOQUEAR, no desaparecer. Si `topeDe` devolviera null por un

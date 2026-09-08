@@ -211,28 +211,48 @@ export function evaluarPropuesta({
  * Qué tope rige para una cuenta.
  *
  * Desde la migración 009 el tope es **por sucursal** (decidido por compras el
- * 2026-09-07), con el del NIT como valor por defecto:
+ * 2026-09-07). El del NIT es un valor por defecto **para todas o para ninguna**:
  *
  *     pp_cuentas.porcentaje_max      manda si NO es NULL
- *     pp_proveedores.porcentaje_max  rige cuando la cuenta no tiene el suyo
+ *     pp_proveedores.porcentaje_max  rige SOLO mientras NINGUNA sucursal del NIT
+ *                                    tenga el suyo
  *
- * ⚠️ TRES ESTADOS, NO DOS, y confundirlos cuesta plata:
+ * ⚠️ EL VACÍO DE UNA SUCURSAL NO SIGNIFICA SIEMPRE LO MISMO, y esto es lo que
+ * hay que entender antes de tocar nada acá (regla de Merkahorro, 2026-09-08):
  *
  *     cuenta = 5      → 5 % para ESTA sucursal
  *     cuenta = 0      → NINGUNA subida en esta sucursal (¡no es "sin tope"!)
- *     cuenta = NULL   → hereda el del NIT
+ *     cuenta = NULL   → depende de sus HERMANAS:
+ *                       · ninguna hermana con tope propio → hereda el del NIT
+ *                       · alguna hermana con tope propio  → SIN TOPE
  *
- * El `0` es el peligroso: es un valor legítimo y es *falsy*, así que un `||` lo
- * trataría como ausente y le devolvería el tope del NIT a una sucursal que
- * Merkahorro congeló a propósito. Por eso `??` y una función con nombre, en un
- * solo lugar — repartir esta decisión por cada consulta es garantizar que en
- * alguna se escriba `||`.
+ * POR QUÉ MIRA A LAS HERMANAS Y NO SOLO A SÍ MISMA
+ * Cargar un tope por sucursal es tomar el control manual del NIT: a partir de
+ * ahí, la sucursal que se dejó vacía se dejó vacía **a propósito**. Que el
+ * default del NIT siguiera cayendo encima convertiría un vacío deliberado en un
+ * límite que nadie puso.
+ *
+ * 🔴 CONSECUENCIA QUE NO HAY QUE PERDER DE VISTA: cargar el PRIMER tope de
+ * sucursal de un NIT le saca el tope a todas sus hermanas vacías en el mismo
+ * movimiento. En un NIT de 17 sucursales, poner uno deja a 16 sin guarda. La
+ * pantalla tiene que decirlo con todas las letras, y por eso `topeDe()` recibe
+ * el dato en vez de deducirlo: quien lo llama ya sabe si está en ese caso.
+ *
+ * El `0` sigue siendo el otro peligroso: es un valor legítimo y es *falsy*, así
+ * que un `||` lo trataría como ausente. Por eso comparaciones explícitas contra
+ * `null`/`undefined` y una función con nombre, en un solo lugar.
  *
  * @param {{porcentajeMax?: number|null}} cuenta
  * @param {{porcentajeMax?: number|null}} proveedor
+ * @param {{hayTopesPropios?: boolean}} [opciones]  Si alguna hermana del NIT
+ *   tiene tope propio. **Omitirlo asume que no**, o sea que se hereda: es el
+ *   lado inofensivo del olvido — un tope de más marca propuestas que quizá no
+ *   correspondía marcar, un tope de menos las deja pasar sin que nadie mire.
  * @returns {number|null} el tope, o `null` para SIN TOPE
  */
-export function topeDe(cuenta, proveedor) {
+export function topeDe(cuenta, proveedor, { hayTopesPropios = false } = {}) {
   const suyo = cuenta?.porcentajeMax;
-  return suyo === null || suyo === undefined ? (proveedor?.porcentajeMax ?? null) : suyo;
+  if (suyo !== null && suyo !== undefined) return suyo;
+  if (hayTopesPropios) return null;
+  return proveedor?.porcentajeMax ?? null;
 }

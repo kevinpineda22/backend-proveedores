@@ -457,12 +457,20 @@ export async function reintentarSolicitud(req, res, next) {
  * ⚠️ ACÁ `null` SIGNIFICA OTRA COSA que en `configurarProveedor`.
  *
  *     en pp_proveedores → null = SIN TOPE
- *     en pp_cuentas     → null = HEREDA el del NIT
+ *     en pp_cuentas     → null = depende de las HERMANAS (2026-09-08):
+ *                          · ninguna con tope propio → hereda el del NIT
+ *                          · alguna  con tope propio → SIN TOPE
  *
- * Son dos verbos distintos con la misma palabra, y es el error fácil de cometer:
- * un admin que "saca el tope" de una sucursal esperando dejarla sin límite le
- * está devolviendo el del NIT. La resolución vive en `topeDe()`; acá solo se
- * guarda, y la pantalla es la que tiene que decirlo con todas las letras.
+ * Son dos verbos distintos con la misma palabra, y es el error fácil de cometer.
+ * La resolución vive entera en `topeDe()`; acá solo se guarda.
+ *
+ * 🔴 ESTE ENDPOINT TIENE UN EFECTO QUE NO SE VE EN SU RESPUESTA. Guardar el
+ * PRIMER tope de sucursal de un NIT le saca el tope a todas sus hermanas vacías,
+ * sin tocar una sola de esas filas. La respuesta habla de una cuenta; el cambio
+ * alcanza a varias. Quien avisa es la pantalla (`PerfilProveedor.jsx` pide
+ * confirmación con el número exacto de sucursales afectadas), así que **todo
+ * cliente nuevo de este endpoint tiene que avisar también** — un script que lo
+ * llame en lote apaga guardas en silencio.
  */
 export async function configurarCuenta(req, res, next) {
   try {

@@ -239,9 +239,36 @@ test("el tope de la SUCURSAL manda sobre el del NIT", () => {
   assert.equal(topeDe({ porcentajeMax: 3 }, { porcentajeMax: 10 }), 3);
 });
 
-test("sin tope propio, hereda el del NIT", () => {
+test("sin tope propio y sin hermanas configuradas, hereda el del NIT", () => {
   assert.equal(topeDe({ porcentajeMax: null }, { porcentajeMax: 10 }), 10);
   assert.equal(topeDe({}, { porcentajeMax: 10 }), 10);
+  assert.equal(topeDe({}, { porcentajeMax: 10 }, { hayTopesPropios: false }), 10);
+});
+
+test("si una HERMANA tiene tope propio, la vacía queda SIN TOPE — no hereda", () => {
+  // La regla de Merkahorro (2026-09-08): cargar topes por sucursal es tomar el
+  // control manual del NIT. La sucursal que quedó vacía quedó vacía a propósito,
+  // y el default del NIT deja de caerle encima.
+  assert.equal(topeDe({ porcentajeMax: null }, { porcentajeMax: 10 }, { hayTopesPropios: true }), null);
+  assert.equal(topeDe({}, { porcentajeMax: 10 }, { hayTopesPropios: true }), null);
+});
+
+test("la hermana configurada no se pisa a sí misma: su tope propio sigue mandando", () => {
+  assert.equal(topeDe({ porcentajeMax: 3 }, { porcentajeMax: 10 }, { hayTopesPropios: true }), 3);
+});
+
+test("un CERO propio sobrevive aunque el NIT ya no rija", () => {
+  // El caso que rompe si alguien resuelve esto con `||`: 0 es falsy, y acá
+  // además el fallback es null. Un `||` devolvería null —SIN TOPE— sobre una
+  // sucursal congelada a propósito. Es el peor de los dos errores posibles.
+  assert.equal(topeDe({ porcentajeMax: 0 }, { porcentajeMax: 10 }, { hayTopesPropios: true }), 0);
+});
+
+test("omitir el flag hereda: el olvido cae del lado que PROTEGE", () => {
+  // Un tope de más marca alguna propuesta que quizá no correspondía marcar.
+  // Un tope de menos la deja pasar sin que nadie la mire. El default es el
+  // primero, y por eso el parámetro es opcional.
+  assert.equal(topeDe({ porcentajeMax: null }, { porcentajeMax: 10 }), 10);
 });
 
 test("un CERO en la sucursal es un tope real, no una ausencia", () => {
@@ -253,6 +280,8 @@ test("un CERO en la sucursal es un tope real, no una ausencia", () => {
 
 test("un CERO en el NIT también, cuando la sucursal no tiene el suyo", () => {
   assert.equal(topeDe({ porcentajeMax: null }, { porcentajeMax: 0 }), 0);
+  // …pero si alguna hermana ya tiene el suyo, ni el 0 del NIT rige.
+  assert.equal(topeDe({ porcentajeMax: null }, { porcentajeMax: 0 }, { hayTopesPropios: true }), null);
 });
 
 test("sin tope en ninguno de los dos es SIN TOPE, no cero", () => {

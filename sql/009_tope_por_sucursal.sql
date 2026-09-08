@@ -21,6 +21,21 @@
 --     pp_cuentas.porcentaje_max      → manda si NO es NULL
 --     pp_proveedores.porcentaje_max  → el que rige si la cuenta no tiene el suyo
 --
+-- 🔴 ACLARACIÓN POSTERIOR (2026-09-08) — LEER ANTES QUE EL RESTO
+-- El texto de abajo dice que un NULL en `pp_cuentas` "hereda el del NIT", a
+-- secas. Merkahorro precisó la regla después de correr esta migración: el tope
+-- del NIT es el default **de todas las sucursales o de ninguna**.
+--
+--     ninguna sucursal del NIT con tope propio → las vacías HEREDAN el del NIT
+--     alguna  sucursal del NIT con tope propio → las vacías quedan SIN TOPE
+--
+-- El esquema NO cambia —sigue siendo esta misma columna nullable—, cambia quién
+-- resuelve: `topeDe()` en `services/costoNeto.js`, que ahora recibe si alguna
+-- hermana tiene el suyo. Por eso no hay una migración 010.
+--
+-- Consecuencia que hay que tener presente al cargar topes: **el primer tope de
+-- sucursal que se guarda le saca el tope a todas las hermanas vacías.**
+--
 -- ⚠️ NULL NO ES CERO, y acá vale doble.
 -- En `pp_cuentas`, NULL significa **"heredá el del NIT"**, no "sin tope". Es una
 -- tercera cosa, distinta de las dos que ya convivían en `pp_proveedores` (NULL =

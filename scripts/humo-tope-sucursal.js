@@ -36,6 +36,7 @@ const IP = "127.0.0.1";
 
 let fallos = 0;
 const ok = (t) => console.log(`  ✓ ${t}`);
+const nota = (t) => console.log(`    ${t}`);
 const mal = (t) => {
   console.log(`  ✗ ${t}`);
   fallos++;
@@ -129,16 +130,34 @@ try {
   if (excedeTope(0.01, rige2)) ok("con tope 0, una subida de 0,01 % se bloquea");
   else mal("con tope 0, una subida de 0,01 % PASA");
 
-  /* ── 3. Volver a heredar ────────────────────────────────────────────────── */
+  /* ── 3. Vaciarla: qué significa el null depende de las HERMANAS ─────────── */
   await patch(cuenta.id, null);
   const e3 = await leer(cuenta.id);
-  const rige3 = topeDe(e3.cuenta, e3.proveedor);
 
   if (e3.crudo.porcentaje_max === null) ok("un null borra el tope propio");
   else mal(`un null dejó ${e3.crudo.porcentaje_max}`);
 
-  if (rige3 === e3.topeDelNit) ok(`vuelve a heredar del NIT (${e3.topeDelNit ?? "sin tope"})`);
-  else mal(`rige ${rige3}, esperaba heredar ${e3.topeDelNit}`);
+  /* Regla de Merkahorro (2026-09-08): el tope del NIT rige mientras NINGUNA
+     sucursal tenga el suyo. Se pregunta a la base, no se asume: esta cuenta
+     acaba de quedar vacía, pero alguna hermana puede tener el suyo cargado. */
+  const { data: hermanasConTope } = await supabase
+    .from("pp_cuentas")
+    .select("sucursal, porcentaje_max")
+    .eq("nit", cuenta.nit)
+    .not("porcentaje_max", "is", null);
+
+  const hayPropios = (hermanasConTope ?? []).length > 0;
+  const rige3 = topeDe(e3.cuenta, e3.proveedor, { hayTopesPropios: hayPropios });
+
+  if (hayPropios) {
+    const cuales = hermanasConTope.map((h) => `${h.sucursal}=${h.porcentaje_max}`).join(", ");
+    nota(`hermanas con tope propio: ${cuales}`);
+    if (rige3 === null) ok("queda SIN TOPE: el NIT dejó de regir para las vacías");
+    else mal(`rige ${rige3}, esperaba sin tope — el NIT no debería regir acá`);
+  } else {
+    if (rige3 === e3.topeDelNit) ok(`vuelve a heredar del NIT (${e3.topeDelNit ?? "sin tope"})`);
+    else mal(`rige ${rige3}, esperaba heredar ${e3.topeDelNit}`);
+  }
 
   /* ── 4. La auditoría guardó el ANTES ────────────────────────────────────── */
   const { data: auditoria } = await supabase

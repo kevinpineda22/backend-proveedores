@@ -150,6 +150,33 @@ export async function requiereProveedor(req, res, next) {
       throw createError(403, "La operación no corresponde a su cuenta");
     }
 
+    /* ¿Alguna hermana de este NIT tiene tope propio? De eso depende que el tope
+       del NIT siga rigiendo para esta sucursal — ver `topeDe()`. Va en una
+       consulta aparte y no en el JOIN de arriba porque la pregunta es del NIT,
+       no de la cuenta: traerla por relación devolvería solo esta fila.
+
+       Se pide UNA sola: alcanza con saber si existe. `porcentaje_max` puede ser
+       0 y 0 es un tope propio legítimo, así que el filtro es `not is null` y
+       jamás una comparación contra cero.
+
+       ⚠️ SI ESTA CONSULTA FALLA, se asume que NO hay topes propios, o sea que se
+       hereda. Es el lado inofensivo: heredar de más marca alguna propuesta que
+       quizá no correspondía marcar; heredar de menos deja pasar una subida sin
+       que nadie la mire. Un error de red no puede aflojar una guarda de plata. */
+    const { data: conTopePropio, error: errorHermanas } = await supabase
+      .from("pp_cuentas")
+      .select("id")
+      .eq("nit", cuenta.nit)
+      .not("porcentaje_max", "is", null)
+      .limit(1);
+
+    if (errorHermanas) {
+      console.error(
+        `[auth] no se pudo saber si el NIT ${cuenta.nit} tiene topes por sucursal; ` +
+          `se hereda el del NIT por precaución: ${errorHermanas.message}`,
+      );
+    }
+
     const proveedor = cuenta.pp_proveedores || {};
     req.usuario = usuario;
     req.cuenta = {
@@ -163,13 +190,16 @@ export async function requiereProveedor(req, res, next) {
          salvo dentro del aviso que lo choca: ahí sí, con el número exacto, porque
          es el momento en que el proveedor necesita saber a qué atenerse.
 
-         Desde la migración 009 el tope es POR SUCURSAL, con el del NIT como
-         valor por defecto. La resolución se hace en `topeDe()` y no acá con un
-         `||`: el 0 es un tope legítimo —"ninguna subida"— y es falsy, así que un
-         `||` le devolvería el tope del NIT a una sucursal congelada a propósito. */
+         Desde la migración 009 el tope es POR SUCURSAL. El del NIT es el default
+         de TODAS o de NINGUNA: en cuanto una sucursal del NIT tiene el suyo, las
+         que quedaron vacías quedan SIN TOPE, no heredando. La resolución vive
+         entera en `topeDe()` y no acá con un `||`: el 0 es un tope legítimo
+         —"ninguna subida"— y es falsy, así que un `||` le devolvería el tope del
+         NIT a una sucursal congelada a propósito. */
       porcentajeMax: topeDe(
         { porcentajeMax: cuenta.porcentaje_max },
         { porcentajeMax: proveedor.porcentaje_max },
+        { hayTopesPropios: (conTopePropio ?? []).length > 0 },
       ),
       bloqueado: Boolean(proveedor.bloqueado),
     };
