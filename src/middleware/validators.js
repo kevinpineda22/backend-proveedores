@@ -97,6 +97,17 @@ export const esquemas = {
     firma: z.string().min(1, "Falta la firma"),
   }),
 
+  /** POST /api/proveedor/solicitudes/lineas/vistas — apagar avisos del inicio */
+  marcarVistas: z.object({
+    /* El tope es alto a propósito: "no me muestres más ninguno" tiene que caber
+       en UN pedido. Partirlo en tandas dejaría al proveedor con la mitad de la
+       pantalla apagada si la segunda falla. */
+    lineaIds: z
+      .array(z.number().int().positive())
+      .min(1, "No se indicó ningún aviso")
+      .max(500),
+  }),
+
   /** POST /api/admin/solicitudes/lineas/aprobar — una, varias o todas */
   resolverLineas: z.object({
     lineaIds: z

@@ -1121,3 +1121,46 @@ export async function catalogoDe(cuenta) {
    el error que devuelve el insert: el try/catch que estaba acá cubría los errores
    lanzados, y un rechazo de Postgres no se lanza, se devuelve. Ver el encabezado
    de ese archivo. */
+
+/**
+ * El proveedor da por vistos unos avisos de su pantalla de inicio.
+ *
+ * Migración 010. Es una marca de PRESENTACIÓN: no cambia el estado de nada, no
+ * toca precios y no borra el motivo del rechazo, que se sigue viendo entero en
+ * "Solicitudes". Lo único que hace es que el inicio deje de destacar esa línea.
+ *
+ * ⚠️ EL AISLAMIENTO SE ESCRIBE ACÁ, no se hereda. Se lee y se escribe con la
+ * service key, que pasa por encima de RLS, así que los dos filtros de la política
+ * `pp_lineas_propias` van repetidos a mano (ARQUITECTURA §5):
+ *
+ *   · `cuenta_destino_id = cuenta.id` — solo las suyas.
+ *   · `origen = 'proveedor'`          — nunca una RÉPLICA. El proveedor no sabe
+ *     que existen: las generó Merkahorro para la sucursal hermana. Sin este
+ *     filtro, un id adivinado dejaría marcar la línea de otra sucursal, y aunque
+ *     el efecto visible fuera nulo, la escritura habría cruzado la frontera.
+ *
+ * NO se marcan las `pendiente`: todavía esperan respuesta y no son un aviso que
+ * se pueda dar por leído. Apagarlas sería esconder lo único que el proveedor está
+ * esperando ver.
+ *
+ * @returns {{vistas: number}} Cuántas se marcaron de verdad. Puede ser menos que
+ *          las pedidas —ids ajenos, réplicas o pendientes— y eso NO es un error:
+ *          decir cuáles se rechazaron sería confirmar que existen.
+ */
+export async function marcarVistas({ lineaIds, cuenta }, cliente = supabase) {
+  const { data, error } = await cliente
+    .from("pp_solicitud_lineas")
+    .update({ visto_at: new Date().toISOString() })
+    .in("id", lineaIds)
+    .eq("cuenta_destino_id", cuenta.id)
+    .eq("origen", "proveedor")
+    .neq("estado", "pendiente")
+    /* Solo las que todavía no estaban vistas: sin esto, volver a marcar una ya
+       marcada le correría la fecha, y esa fecha es el único rastro de cuándo el
+       proveedor leyó el rechazo. */
+    .is("visto_at", null)
+    .select("id");
+
+  if (error) throw new Error(error.message);
+  return { vistas: (data ?? []).length };
+}

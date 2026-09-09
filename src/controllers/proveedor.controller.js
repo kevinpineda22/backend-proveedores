@@ -1,4 +1,4 @@
-import { catalogoDe, crearSolicitud, anular } from "../services/solicitud.service.js";
+import { catalogoDe, crearSolicitud, anular, marcarVistas } from "../services/solicitud.service.js";
 import { supabase } from "../config/supabase.js";
 
 /** Quién soy. El frontend arma el encabezado con esto, sin pedir el maestro. */
@@ -49,7 +49,10 @@ export async function misSolicitudes(req, res, next) {
         "id, solicitud_id, clave_item, item, descripcion_item, unidad_medida, precio_actual, " +
           "precio_propuesto, descuentos_actuales, descuentos_propuestos, impuestos_vigentes, " +
           "impuestos_propuestos, costo_neto_actual, costo_neto_propuesto, variacion_pct, " +
-          "fecha_activacion, estado, motivo_rechazo, creado_at, resuelto_at, " +
+          // `visto_at` (migración 010) decide si el inicio destaca esta línea.
+          // Sin traerlo, el proveedor apagaría un aviso y le volvería a aparecer
+          // en la siguiente carga: la marca estaría guardada y nadie la leería.
+          "fecha_activacion, estado, motivo_rechazo, creado_at, resuelto_at, visto_at, " +
           "pp_solicitudes!inner(id, cuenta_id, creado_at)",
       )
       .eq("cuenta_destino_id", req.cuenta.id)
@@ -91,6 +94,22 @@ export async function anularSolicitud(req, res, next) {
         ip: req.ip,
       }),
     );
+  } catch (e) {
+    next(e);
+  }
+}
+
+/**
+ * El proveedor apaga avisos de su pantalla de inicio (migración 010).
+ *
+ * Devuelve cuántos se apagaron, no cuáles fallaron. Un id que no era suyo
+ * simplemente no entra en la cuenta: responder "esa línea no es tuya" confirmaría
+ * que existe, y eso es exactamente lo que ARQUITECTURA §5 no quiere que se pueda
+ * averiguar probando números.
+ */
+export async function marcarVistasDeLineas(req, res, next) {
+  try {
+    res.json(await marcarVistas({ lineaIds: req.body.lineaIds, cuenta: req.cuenta }));
   } catch (e) {
     next(e);
   }

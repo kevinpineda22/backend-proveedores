@@ -75,6 +75,15 @@ rProveedor.post(
    propuestas nuevas, pero retirar una que ya mandó es siempre suyo. Bloquearlo
    ahí lo dejaría con una solicitud viva que no puede ni sacar ni reemplazar. */
 rProveedor.post("/solicitudes/:id/anular", proveedor.anularSolicitud);
+/* Apagar avisos del inicio. Tampoco lleva `puedeProponer`: no propone nada, solo
+   deja de destacar algo en su propia pantalla. Un proveedor bloqueado sigue
+   entrando a ver su catálogo, y no tendría sentido condenarlo a una pantalla que
+   le grita cosas que no puede resolver. */
+rProveedor.post(
+  "/solicitudes/lineas/vistas",
+  validar(esquemas.marcarVistas),
+  proveedor.marcarVistasDeLineas,
+);
 router.use("/proveedor", rProveedor);
 
 /* ── ADMIN ────────────────────────────────────────────────────────────────── */
