@@ -47,7 +47,14 @@ CRON_SECRET                         ← sin esto el snapshot queda CERRADO
 CORS_ORIGENES=https://merkahorro.com,http://localhost:5173
 PORTAL_PROVEEDORES_URL              ← el enlace del correo de invitación
 EMAIL_USER  EMAIL_PASS  SMTP_HOST  SMTP_PORT  SMTP_SECURE
+SIESA_PG_HOST  SIESA_PG_PORT  SIESA_PG_USER  SIESA_PG_PASSWORD  SIESA_PG_DATABASE
+SIESA_PG_SSL=disable                ← el servidor NO acepta SSL (medido 2026-09-14)
 ```
+
+`SIESA_PG_*` es la réplica Postgres de SIESA (`merkahorro_siesa`), que carga otra
+persona. Este backend **solo la lee**, siempre dentro de `BEGIN READ ONLY`
+(`src/config/siesaPg.js`). Sin esas variables, solo falla la pantalla de
+diferencias de costo; el resto del portal sigue andando.
 
 Interruptores útiles mientras se prueba:
 
@@ -78,6 +85,9 @@ otra consulta, no un permiso faltante.
 | GET | `/api/admin/admins` | `pp_admins` |
 | POST | `/api/admin/admins` | `pp_admins` |
 | PATCH | `/api/admin/admins/:userId` | `pp_admins` |
+| GET | `/api/proveedor/diferencias-costo?desde&hasta` | proveedor (solo su sucursal) |
+| GET | `/api/admin/diferencias-costo?desde&hasta&nit` | `pp_admins` |
+| PUT | `/api/admin/diferencias-costo/seguimiento` | `pp_admins` |
 | POST | `/api/cron/snapshot` | `CRON_SECRET` |
 
 **Una solicitud es un PAQUETE** desde la migración 006. `POST

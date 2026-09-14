@@ -1,6 +1,6 @@
 # Portal de Proveedores — todo lo pendiente
 
-Actualizado el **2026-09-07**.
+Actualizado el **2026-09-14**.
 
 **Este archivo es la única fuente del ESTADO del proyecto**: qué falta, qué hay en
 la base y qué no hay que romper. Si un dato de estado aparece en otro documento y
@@ -36,17 +36,29 @@ queda es de otros — y subir el frontend.**
 - §4 datos de prueba — ✅ limpiados el 2026-09-02
 - §2.7 ¿cascada o suma con dos descuentos? — ✅ cerrada el 2026-09-07: **cascada**
 - Migración `008` — ✅ **corrida el 2026-09-07**: `pp_solicitudes_precio` ya no existe
-- §1.4 conector a producción — ⏳ una variable de entorno
-- §2.4 mirar en SIESA QA qué dejaron las pruebas del 06 — ⏳
+- §1.4 conector a producción — ⏸️ **sigue en QA a propósito**: queda otra zona
+  del proyecto por construir y se prueba contra QA. Se prende en el corte (§4)
+- §2.4 mirar en SIESA QA qué dejaron las pruebas del 06 — ✅ **QA verificó
+  todo y funcionó** (2026-09-14)
 - §2.2 ¿el tope es por NIT o por sucursal? — ✅ **cerrada el 2026-09-07: por
   SUCURSAL**, con el del NIT por defecto. Migración `009` corrida y verificada
 - §2.3 ¿y si el precio cambia entre la solicitud y la aprobación? — ⏳ **la única
   que queda para compras**
 - **Grupos de sucursales hermanas (007)** — ⏳ 30 sugeridos, **0 activos**:
   esperan que compras confirme cuáles replican precio
+- **§9 Diferencias de costo** — ✅ código, migración `011` y variables en Vercel
+  (2026-09-14). ⏳ **Probar desplegado**: que Vercel llegue a la réplica y el
+  primer "Marcar cotización corregida" real. Ver la lista de §9
+- **§10 Interfaz del portal** — ✅ tablas, colores, identidad del proveedor y
+  selección en dos pasos (2026-09-14). ⏳ Bandeja del admin en laptop
 
 ⚠️ **Antes de prender §1.4**, decidir qué pasa con las dos cuentas de prueba de
 Altipal, que siguen activas. Ver §4.
+
+📋 **El corte a producción es una operación con SIETE piezas** —admins, correo de
+compras, cuentas de prueba, conector, topes, grupos y los datos de prueba— y
+hacerlas de memoria garantiza olvidar una. La tabla completa, con el orden que
+importa, está al final de §4.
 
 > **Este documento NO dice qué está subido.** Acá hubo dos veces un renglón que lo
 > afirmaba, y las dos veces envejeció en un día: primero *"nada de esto está
@@ -88,7 +100,7 @@ corridas: el cliente de Supabase va por PostgREST, que **cachea el esquema**. Pa
 saber si una tabla existe, la fuente es SQL directo —`to_regclass`, `pg_tables`—,
 no el cliente. Si el caché molesta: `NOTIFY pgrst, 'reload schema';`
 
-### 1. La ronda de pruebas que pidió QA · ✅ **MANDADA — falta que QA la mire**
+### 1. La ronda de pruebas que pidió QA · ✅ **VALIDADA POR QA (2026-09-02)**
 
 Al confirmar la #5, QA pidió probar además **los descuentos** y **productos con
 unidades de medida distintas**. Es el pedido correcto: son justo los dos lugares
@@ -180,8 +192,8 @@ anular una propuesta y exportar la bandeja a Excel.
 
 ## 1. BLOQUEANTES — sin esto no se sale a producción
 
-De los cuatro, quedan **§1.4** (una variable) y la ronda de pruebas **§1.5** que
-lo precede. §1.1, §1.2 y §1.3 están cerrados.
+Queda solo **§1.4** (una variable), y se deja en QA a propósito hasta terminar la
+zona del proyecto que falta. §1.1, §1.2, §1.3 y §1.5 están cerrados.
 
 **El portal no tiene ningún pendiente propio de código.**
 
@@ -308,8 +320,8 @@ La lista de control para validar el filtro está en
 
 1. ✅ **La consulta anda.** `node scripts/diagnostico-terceros.js --control`
    sale en verde.
-2. ⏳ Poner `SIESA_CONSULTA_TERCEROS` en Vercel y redesplegar.
-3. ⏳ Correr el snapshot a mano y mirar `proveedoresNoTraidos`: **tiene que ser 0**.
+2. ✅ Poner `SIESA_CONSULTA_TERCEROS` en Vercel y redesplegar.
+3. ✅ Correr el snapshot a mano y mirar `proveedoresNoTraidos`: **dio 0**.
 4. Mantener `ignoreDuplicates: true` en los upsert, o cada corrida borra los
    topes que Merkahorro configuró a mano.
 
@@ -587,8 +599,8 @@ se midió en vez de asumirlo.
 **El límite no vuelve.** El múltiplo exacto entra igual en un plano compartido.
 `scripts/prueba-lote-siesa.js --caso LOTE-2`.
 
-Queda pendiente lo único que el código no puede comprobar: **mirar en la pantalla
-de QA que las dos filas estén de verdad** (§2.4). El conector lee de producción y
+Lo único que el código no podía comprobar —**que las dos filas estén de verdad en
+la pantalla de QA**— lo verificó QA el 2026-09-14 (§2.4). El conector lee de producción y
 escribe en QA, así que `verificarCotizacion()` no cierra el círculo.
 
 **De paso, un dato del catálogo que no estaba documentado:** la unidad de medida
@@ -598,7 +610,7 @@ Verificado sobre los precios: `1032 P2 = 2 × UND`, `2022 P4 = 4 × UND`,
 
 ---
 
-### 1.5 · La ronda de pruebas de QA — descuentos y unidades de medida
+### 1.5 · La ronda de pruebas de QA — descuentos y unidades de medida · ✅ **VALIDADA**
 
 **Pedida el 2026-09-02**, al confirmar la #5. QA quiere ver el conector con
 descuentos y con productos de U.M. distintas antes de habilitar producción.
@@ -729,8 +741,9 @@ hacia el lado inofensivo.
 Para pasar a producción se **agrega** la variable con la URL real del conector
 (`servicios.siesacloud.com`, sin el `qa`). **Una variable.**
 
-§1.2 ya está cerrado; ahora el previo es **§1.5**, la ronda de pruebas que pidió
-QA. Hacerlo después de eso, no antes.
+§1.2 y §1.5 están cerrados: **no queda ningún previo técnico.** Se deja en QA a
+propósito (decidido el 2026-09-14) porque falta construir otra zona del proyecto
+y se sigue probando contra QA. Se prende el día del corte, en el orden de §4.
 
 Y al hacerlo, §5.6 empieza a verificar de verdad: mientras se lea de producción y
 se escriba en QA, toda verificación post-escritura sale `no_verificable` — con
@@ -804,7 +817,10 @@ si eso amerita una advertencia más fuerte o un rechazo automático.
 
 ---
 
-### 2.4 · ⏳ Mirar en la pantalla de SIESA QA qué dejaron las pruebas del 2026-09-06
+### 2.4 · ✅ **CERRADO (2026-09-14)** — QA verificó las pruebas del 2026-09-06
+
+**QA las revisó en la pantalla del ERP y funcionaron todas.** Lo de abajo queda
+como registro de qué se probó y qué habría significado cada falla.
 
 Se mandaron cuatro pruebas a QA con `scripts/prueba-lote-siesa.js --real`. **Las
 cuatro contestaron `codigo: 0`, y eso es un acuse de recibo, no una prueba.** Acá
@@ -1036,6 +1052,30 @@ Las pruebas del conector (`scripts/pruebas-siesa-qa.js`) **no dejan filas acá**
 van directo a SIESA con un `solicitudId` de texto (`qa-A`), sin pasar por
 `pp_solicitudes_precio`. Lo que dejaron está en SIESA QA, con fecha de activación
 15/10/2026.
+
+#### El corte a producción: todo esto se hace JUNTO
+
+Johan, 2026-09-08: *"esto ha sido plenamente de pruebas, pronto eliminamos todos
+los datos, apuntamos a producción y todo vacío, cuando el sistema esté completo"*.
+
+Entonces nada de lo de abajo es un problema HOY. Lo que sí es un problema es
+hacerlo de memoria el día del corte y olvidar una pieza: cada una sola se ve
+inofensiva, y juntas son la diferencia entre un portal limpio y uno con accesos
+de prueba vivos contra proveedores reales.
+
+| Pieza | Estado al 2026-09-08 | Qué hay que hacer |
+|---|---|---|
+| Admins del portal | 2 Gmail personales de Johan | Reemplazar por correos `@merkahorrosas.com`. **Desactivar, nunca borrar**: `pp_auditoria` apunta a esas filas |
+| `COMPRAS_EMAIL` | `johanmerkahorro777@gmail.com` | El correo real de compras, en Vercel |
+| Cuentas Altipal 006 y 009 | activas | Decidir: desactivar o reasignar al correo del proveedor real |
+| Conector SIESA (§1.4) | QA | Una variable de entorno a producción |
+| Topes | 1 en 3.539 proveedores | Los define compras; hoy la guarda no guarda nada |
+| Grupos de sucursales hermanas | 30 sugeridos, 0 activos | Compras confirma cuáles replican precio |
+| Solicitudes y firmas de prueba | 7 líneas en la cuenta 59 | Borrar. ⚠️ `pp_firmas` y `pp_auditoria` son **append-only por trigger**: no se borran con un DELETE común |
+
+⚠️ El orden importa en una: **apagar las cuentas de prueba ANTES de prender el
+conector en producción**, no después. Entre las dos cosas hay una ventana en la
+que un acceso de prueba escribe precios reales en el ERP.
 
 ---
 
@@ -1573,3 +1613,125 @@ node scripts/diagnostico-terceros.js --control  # + contrasta los 337 NIT de con
 |---|---|
 | `PROVEEDORES_SANDBOX=true` | Arma el payload y lo deja en el log, **sin escribir en SIESA** |
 | `PROVEEDORES_MAIL_PRUEBA=true` | Escribe el correo en el log en vez de mandarlo |
+
+---
+
+## 9. DIFERENCIAS DE COSTO
+
+Pedido por María José (compras) el 2026-09-14. Reemplaza al Excel *"Novedades al 30
+de noviembre"*, que calculaba mal el costo unitario. La pantalla está en los DOS
+lados: el admin ve todos los proveedores y marca el seguimiento; el proveedor ve
+solo su sucursal, en modo lectura.
+
+### Estado al 2026-09-14
+
+| | |
+|---|---|
+| Migración `011` | ✅ corrida — verificado: `pp_diferencias_seguimiento` existe (0 filas) |
+| `SIESA_PG_*` en Vercel | ✅ cargadas por Johan |
+| Código | ✅ backend y frontend listos; Johan lo sube para que María José presente el proyecto |
+| Tests | 350 backend · 318 frontend del portal, verdes |
+
+### ⏳ Lo que falta — en este orden
+
+1. **Comprobar que Vercel llega a `2.25.203.152:6543`.** Desde la PC de Johan
+   conecta; desde Vercel **no está verificado**. Abrir "Diferencias de costo" en
+   producción: si responde *"No se pudo consultar la información de SIESA"* (502),
+   lo más probable es que el servidor filtre por IP, y eso lo resuelve quien
+   administra la réplica — no es código.
+2. **Primer "Marcar cotización corregida" real.** La escritura del seguimiento
+   (`PUT /api/admin/diferencias-costo/seguimiento`) **nunca se ejecutó contra la
+   base**: la tabla no existía cuando se probó. Marcar una, recargar la página y
+   confirmar que sigue marcada; en la base tiene que aparecer la fila con
+   `actualizado_por`, y en `pp_auditoria` la acción `seguimiento_diferencia`.
+3. **Verlo con las dos sesiones reales**, admin y proveedor. Lo que se probó sin
+   sesión: SQL contra la réplica, cálculo contra el Excel, rutas registradas,
+   render con datos simulados. Lo que NO: la pantalla con datos reales y un login.
+4. **Preguntar a compras por CFP-00307879, ítem 2017**: entrada de $143.000 y un
+   CAS-00007514 por $809.461. Da costo negativo; la pantalla lo marca "Revisar en
+   SIESA".
+
+### 💡 Pedidos abiertos que salieron en la conversación, sin decidir
+
+- **Avisar al proveedor.** Johan: *"si algo está mal calculado, a ellos se les
+  debe avisar, en la pestaña de inicio o en otra pestaña"*. Hoy hay pestaña y
+  contador en el sidebar; **no hay aviso en Inicio ni por correo**. Decidir cuál.
+- **Devoluciones (CDP) por motivo.** María José: se omiten del costo, pero *"se
+  va a usar para hacer analítica por motivo"*. No hay nada hecho.
+- **Exportar a Excel** la pantalla del admin, como la bandeja
+  (`utils/exportarBandeja.js`). No se pidió; es lo primero que va a extrañar quien
+  venía del Excel.
+- **Causación CDN.** María José dijo "omitirlas" (4.898 entradas en la base). Si
+  cambia de criterio, es sumar `"CDN"` a `CAUSACIONES` en
+  `services/diferenciasCosto.js`.
+
+### Las reglas — confirmadas por María José, 2026-09-14
+
+| Regla | Detalle |
+|---|---|
+| Llave | Factura (`docto_causacion`) + ítem |
+| Facturas | Solo **CFP y CFM**. CNJ, CDN, CND, CDM y entradas sin factura, afuera |
+| Qué es una diferencia | Tener un **CAS** (menor costo) o un **CAE** (mayor costo). Sin ajuste "llegó bien" y no se muestra |
+| Factura en varias entradas | El ajuste **se reparte** por cantidad |
+| Bonificadas (bruto 0) | **No diluyen**: ni reciben ajuste ni entran en la división |
+| Devoluciones (CDP) | Afuera. Van a servir aparte, para analítica por motivo |
+| Antes de impuestos | `bruto − descuentos`. IVA, ICO, IBUA quedan afuera; ICO e IBUA se **muestran** por unidad |
+| Ventana | Últimos **3 meses**, filtrable por cualquier rango adentro (Johan) |
+| Seguimiento | Pendiente / Corregido. **Solo compras** lo marca |
+
+### Verificado contra la base el 2026-09-14
+
+- Contra el Excel: de las 229 filas con costo, **221 dan igual**. Las 8 restantes
+  son errores del Excel: el ajuste sumado entero a cada entrada (−$43.175 por
+  unidad donde lo real es $3.381,05) y $1.169 por unidad a 8 unidades regaladas.
+- **El Excel además no mostraba 224 entradas con diferencia** del mismo período.
+- Ventana de 3 meses: 2.511 entradas, 82 cuentas, **2,4 s**.
+
+### Tres trampas de los datos
+
+1. **SIESA guarda los CAS en POSITIVO.** El signo lo pone el tipo de documento.
+2. **El NIT viene con relleno** (`"800007955      "`). Sin `btrim`, ningún
+   proveedor encuentra sus filas — y no da error, da una pantalla vacía.
+3. **`cantidad` ya está en unidades** (P48 × 120 = 5.760); `cantidad_inv` está en
+   paquetes. Los KL vienen en kilos.
+
+### ⚠️ Rendimiento: no volver a cruzar dos agregados del mismo CTE
+
+La primera versión tardaba **31,7 s** (noviembre: 268 s) aunque leer los datos
+tomaba menos de un segundo. `left(documento,3)` no tiene estadística, el
+planificador estimaba 1 fila y re-agregaba 2.587 veces en un nested loop. El total
+de la factura sale ahora de `sum() OVER (PARTITION BY …)`, y el filtro de fechas
+va en una capa de afuera: si fuera en el mismo SELECT, se aplicaría antes de la
+ventana y el reparto perdería las entradas del borde del rango.
+
+Archivos: `config/siesaPg.js` · `services/diferenciasCosto.js` (+ tests) ·
+`services/seguimientoDiferencias.js` (+ tests) · `controllers/diferenciasCosto.controller.js`
+· `sql/011_seguimiento_diferencias_costo.sql`. En el front:
+`components/DiferenciasCosto.jsx`, `hooks/useDiferenciasCosto.js`,
+`utils/diferenciasCosto.js` (+ tests).
+
+---
+
+## 10. INTERFAZ DEL PORTAL — cambios del 2026-09-14
+
+Todo frontend (`Pagina-web_React/src/pages/PortalProveedores/`). Pedidos por Johan
+antes de que María José presente el proyecto.
+
+| Cambio | Dónde | La regla que no hay que romper |
+|---|---|---|
+| **Un solo estilo de tablas**: encabezado lavanda, filas alternadas, líneas entre filas y columnas, fuente Roboto | `styles/pp-shared.css` → bloque "Tablas" | Todo dentro de `:where()`, **especificidad cero**: los estados de fila (aumento en ámbar, error de plantilla) y la vista en tarjetas tienen que ganarle sin `!important` |
+| **El morado oscuro solo en el sidebar**; el resto usa un violeta más claro | `styles/pp-shared.css` → redefine `--sfc-medium/dark/light` dentro del portal | El gradiente del sidebar va con hex **literales**. No tocar `sf-corporate-tokens.css`: lo usa Sin Filas |
+| **Identidad del proveedor arriba del sidebar** (razón social, NIT, sucursal y su nombre) | `components/PortalLayout.jsx`, prop `identidad` | Una sola vez: se sacaron el pie y el encabezado repetido del contenido. El admin sigue con "Portal de Proveedores" |
+| **Tablas como tabla en laptop**: el corte a tarjetas bajó de 1200 a 900 (catálogo, firma) y de 1050 a 760 (solicitudes) | `components/FilaCotizacion.css`, `ProveedorPanel.css`, `components/FirmarPaquete.css` | Con el corte en 1200, en una laptop con sidebar el proveedor **nunca** veía la tabla |
+| **Selección en dos pasos** (patrón Gmail): la casilla marca la página; una barra ofrece "Seleccionar 100 de los 1.237" y "Quitar selección" | `utils/seleccionFiltro.js` (+ 14 tests), `ProveedorPanel.jsx` | **La barra no es opcional.** Marcar por página sin barra ya falló (creían tener 40 y tenían 25); marcar el resultado entero falló al revés (100 marcados, 25 visibles). La acción se decide por el estado, nunca por `e.target.checked` |
+
+### ⏳ Lo que queda de interfaz
+
+- **Bandeja del admin en laptop.** Sigue pasando a tarjetas bajo 1200 px de
+  contenedor, así que en una laptop el admin ve tarjetas. No se bajó porque tiene
+  10 columnas y no se probó con datos reales. Probar a 1100 px y, si se lee, bajar
+  el primer `@container pp-bandeja (max-width: 1200px)` de
+  `components/BandejaAprobaciones.css` (hay dos: líneas y paquetes).
+- **Cómo se verificó sin sesión**, para repetirlo: inyectar HTML con las clases
+  reales en el servidor de desarrollo e importar las hojas con
+  `await import('/src/pages/PortalProveedores/…css')`, a 1600, 1100 y 760 px.

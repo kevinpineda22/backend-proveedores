@@ -160,6 +160,33 @@ export const esquemas = {
     activo: z.boolean({ required_error: "Indique si el administrador queda activo o inactivo" }),
   }),
 
+  /** GET /api/proveedor/diferencias-costo — la ventana la valida el servicio */
+  rangoDiferencias: z.object({
+    desde: fechaISO.optional(),
+    hasta: fechaISO.optional(),
+  }),
+
+  /** GET /api/admin/diferencias-costo — el admin además puede filtrar un NIT */
+  rangoDiferenciasAdmin: z.object({
+    desde: fechaISO.optional(),
+    hasta: fechaISO.optional(),
+    nit: z.string().trim().regex(/^\d{5,15}$/, "NIT inválido").optional(),
+  }),
+
+  /** PUT /api/admin/diferencias-costo/seguimiento */
+  marcarSeguimiento: z.object({
+    // Solo CFP y CFM tienen diferencias. Gemelo del CHECK de sql/011.
+    doctoCausacion: z
+      .string()
+      .trim()
+      .regex(/^(CFP|CFM)-\d{1,12}$/, "Factura inválida"),
+    item: z.number().int().positive(),
+    // Obligatorio y sin default: volver algo a pendiente no puede ser el efecto
+    // de omitir un campo.
+    estado: z.enum(["pendiente", "corregido"]),
+    nota: z.string().trim().max(500).nullable().optional(),
+  }),
+
   /** GET /api/publico/sucursales?nit=… */
   sucursalesPorNit: z.object({
     nit: z.string().trim().min(5, "NIT inválido").max(15),

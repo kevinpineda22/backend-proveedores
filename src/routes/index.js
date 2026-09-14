@@ -6,6 +6,7 @@ import { createError } from "../middleware/errorHandler.js";
 import * as proveedor from "../controllers/proveedor.controller.js";
 import * as admin from "../controllers/admin.controller.js";
 import { sucursalesPorNit } from "../controllers/publico.controller.js";
+import * as diferencias from "../controllers/diferenciasCosto.controller.js";
 import { sincronizar } from "../services/snapshot.service.js";
 import { invitar, activar, solicitarRecuperacion } from "../services/invitacion.service.js";
 
@@ -84,6 +85,13 @@ rProveedor.post(
   validar(esquemas.marcarVistas),
   proveedor.marcarVistasDeLineas,
 );
+/* Diferencias de costo de SU sucursal. Sin `puedeProponer`: es solo lectura, y
+   un proveedor bloqueado es justo el que más necesita ver qué se le facturó mal. */
+rProveedor.get(
+  "/diferencias-costo",
+  validar(esquemas.rangoDiferencias, "query"),
+  diferencias.listarProveedor,
+);
 router.use("/proveedor", rProveedor);
 
 /* ── ADMIN ────────────────────────────────────────────────────────────────── */
@@ -129,6 +137,19 @@ rAdmin.get("/firmas/:id", admin.verFirma);
 rAdmin.post("/solicitudes/lineas/aprobar", validar(esquemas.resolverLineas), admin.aprobarSolicitud);
 rAdmin.post("/solicitudes/lineas/rechazar", validar(esquemas.rechazarLineas), admin.rechazarSolicitud);
 rAdmin.post("/solicitudes/lineas/reintentar", validar(esquemas.resolverLineas), admin.reintentarSolicitud);
+
+/* Diferencias de costo (réplica de SIESA, solo lectura) y su seguimiento (011).
+   Marcar "corregido" es SOLO de compras: por eso vive acá y no en /proveedor. */
+rAdmin.get(
+  "/diferencias-costo",
+  validar(esquemas.rangoDiferenciasAdmin, "query"),
+  diferencias.listarAdmin,
+);
+rAdmin.put(
+  "/diferencias-costo/seguimiento",
+  validar(esquemas.marcarSeguimiento),
+  diferencias.marcar,
+);
 router.use("/admin", rAdmin);
 
 /* ── CRON ─────────────────────────────────────────────────────────────────
