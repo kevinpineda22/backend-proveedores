@@ -15,6 +15,7 @@ import {
   marcarDiferenciasVistas,
   marcarSeguimiento,
   paraProveedor,
+  visibleParaProveedor,
 } from "../services/seguimientoDiferencias.js";
 
 /**
@@ -79,7 +80,12 @@ export async function listarProveedor(req, res, next) {
       leerVistasHasta(req.cuenta.id),
     ]);
     // `vistasHasta` decide el aviso de Inicio (migración 012).
-    res.json({ ...r, vistasHasta, filas: r.filas.map(paraProveedor) });
+    // Lo de MENOR costo no se le muestra NUNCA al proveedor: ver `visibleParaProveedor`.
+    res.json({
+      ...r,
+      vistasHasta,
+      filas: r.filas.filter(visibleParaProveedor).map(paraProveedor),
+    });
   } catch (e) {
     next(e);
   }

@@ -65,6 +65,26 @@ export function combinar(filas, mapa) {
 }
 
 /**
+ * ¿Esta diferencia se le puede mostrar al proveedor?
+ *
+ * Johan, 2026-09-14: *"por menor valor no mostrar a los proveedores NUNCA. A
+ * compras sí debe mostrarle todo"*.
+ *
+ * Solo `mayor` (CAE puro). Queda afuera `menor` (CAS) y también `mixto` —una
+ * factura con CAS y CAE a la vez—: su costo real ya trae el CAS adentro, así que
+ * mostrarla revelaría justo lo que no se muestra. Al 2026-09-14 no hay ninguna
+ * mixta en tres meses (1.607 menor, 904 mayor); la regla es para el día que
+ * aparezca.
+ *
+ * ⚠️ SE FILTRA ACÁ, EN EL BACKEND. Esconderlo en la pantalla dejaría las filas en
+ * la respuesta de la API, a la vista de cualquiera con las herramientas del
+ * navegador. Lo que el proveedor no debe ver no sale del servidor: ARQUITECTURA §5.
+ * El frontend repite el filtro (`useDiferenciasCosto`) solo para no depender del
+ * despliegue; la garantía es ésta.
+ */
+export const visibleParaProveedor = (fila) => fila?.tipoAjuste === "mayor";
+
+/**
  * Lo que ve el proveedor: el estado y la fecha, sin la nota interna ni el nombre
  * de quién la marcó. La nota es de compras para compras.
  */

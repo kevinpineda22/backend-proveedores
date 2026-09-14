@@ -1,6 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { combinar, llave, paraProveedor } from "./seguimientoDiferencias.js";
+import { combinar, llave, paraProveedor, visibleParaProveedor } from "./seguimientoDiferencias.js";
+
+test("al proveedor NUNCA se le muestra lo de MENOR costo (CAS)", () => {
+  // Johan, 2026-09-14: "por menor valor no mostrar a los proveedores NUNCA".
+  assert.equal(visibleParaProveedor({ tipoAjuste: "menor" }), false);
+});
+
+test("una factura con CAS y CAE a la vez tampoco: su costo real trae el CAS adentro", () => {
+  assert.equal(visibleParaProveedor({ tipoAjuste: "mixto" }), false);
+});
+
+test("lo de MAYOR costo (CAE) sí se le muestra", () => {
+  assert.equal(visibleParaProveedor({ tipoAjuste: "mayor" }), true);
+});
+
+test("sin tipo, o con uno desconocido, no se muestra: ante la duda, no sale", () => {
+  assert.equal(visibleParaProveedor({}), false);
+  assert.equal(visibleParaProveedor(null), false);
+  assert.equal(visibleParaProveedor({ tipoAjuste: "otro" }), false);
+});
 
 const FILA = { clave: "CFP-1|76|CEA-9", doctoCausacion: "CFP-1", item: 76, costoReal: 10 };
 

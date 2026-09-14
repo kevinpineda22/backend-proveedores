@@ -1746,6 +1746,7 @@ En la lista de solicitudes de la bandeja, a 1280 px. Columna de 8 % → 10 %.
 | Antes de impuestos | `bruto − descuentos`. IVA, ICO, IBUA quedan afuera; ICO e IBUA se **muestran** por unidad |
 | Ventana | Últimos **3 meses**, filtrable por cualquier rango adentro (Johan) |
 | Seguimiento | Pendiente / Corregido. **Solo compras** lo marca |
+| **Qué ve el proveedor** | 🔒 **Solo lo de MAYOR costo (CAE).** Johan, 2026-09-14: *"por menor valor no mostrar a los proveedores NUNCA. A compras sí debe mostrarle todo"*. Tampoco las facturas mixtas (CAS y CAE): su costo real trae el CAS adentro. Se filtra **en el backend** (`visibleParaProveedor` en `services/seguimientoDiferencias.js`, con tests) para que las filas ni salgan del servidor; el front lo repite en `useDiferenciasCosto` solo para no depender del despliegue. El aviso de Inicio dice "por encima del valor de la orden", y los filtros "Menor costo" y "Revisar" son solo de compras |
 
 ### Verificado contra la base el 2026-09-14
 
