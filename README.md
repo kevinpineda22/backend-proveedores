@@ -86,6 +86,7 @@ otra consulta, no un permiso faltante.
 | POST | `/api/admin/admins` | `pp_admins` |
 | PATCH | `/api/admin/admins/:userId` | `pp_admins` |
 | GET | `/api/proveedor/diferencias-costo?desde&hasta` | proveedor (solo su sucursal) |
+| POST | `/api/proveedor/diferencias-costo/visto` | proveedor (oculta el aviso de Inicio) |
 | GET | `/api/admin/diferencias-costo?desde&hasta&nit` | `pp_admins` |
 | PUT | `/api/admin/diferencias-costo/seguimiento` | `pp_admins` |
 | POST | `/api/cron/snapshot` | `CRON_SECRET` |

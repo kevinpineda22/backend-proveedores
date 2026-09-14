@@ -11,6 +11,8 @@ import {
 import {
   combinar,
   leerSeguimiento,
+  leerVistasHasta,
+  marcarDiferenciasVistas,
   marcarSeguimiento,
   paraProveedor,
 } from "../services/seguimientoDiferencias.js";
@@ -72,12 +74,22 @@ export async function listarAdmin(req, res, next) {
 /** GET /api/proveedor/diferencias-costo?desde&hasta — solo lo de SU sucursal */
 export async function listarProveedor(req, res, next) {
   try {
-    const r = await diferencias({
-      query: req.query,
-      nit: req.cuenta.nit,
-      sucursal: req.cuenta.sucursal,
-    });
-    res.json({ ...r, filas: r.filas.map(paraProveedor) });
+    const [r, vistasHasta] = await Promise.all([
+      diferencias({ query: req.query, nit: req.cuenta.nit, sucursal: req.cuenta.sucursal }),
+      leerVistasHasta(req.cuenta.id),
+    ]);
+    // `vistasHasta` decide el aviso de Inicio (migración 012).
+    res.json({ ...r, vistasHasta, filas: r.filas.map(paraProveedor) });
+  } catch (e) {
+    next(e);
+  }
+}
+
+/** POST /api/proveedor/diferencias-costo/visto — ocultar el aviso de Inicio */
+export async function marcarVisto(req, res, next) {
+  try {
+    // La cuenta sale del JWT, nunca del body: ARQUITECTURA §5.
+    res.json(await marcarDiferenciasVistas({ cuentaId: req.cuenta.id, hasta: req.body.hasta }));
   } catch (e) {
     next(e);
   }

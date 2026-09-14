@@ -76,6 +76,42 @@ export function paraProveedor(fila) {
   };
 }
 
+/* ── El aviso de Inicio del proveedor (migración 012) ─────────────────────── */
+
+/**
+ * Hasta qué carga de la réplica el proveedor ya vio el aviso.
+ *
+ * NO LANZA: si la columna no existe todavía (012 sin correr) o la consulta
+ * falla, devuelve null — el aviso se muestra. Mostrar de más un aviso que se
+ * puede cerrar es inofensivo; dejar sin pantalla de diferencias al proveedor
+ * por una columna de presentación no lo es.
+ */
+export async function leerVistasHasta(cuentaId) {
+  try {
+    const { data, error } = await supabase
+      .from("pp_cuentas")
+      .select("diferencias_vistas_hasta")
+      .eq("id", cuentaId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data?.diferencias_vistas_hasta ?? null;
+  } catch (e) {
+    console.error(`[diferencias] no se pudo leer el aviso visto de la cuenta ${cuentaId}: ${e.message}`);
+    return null;
+  }
+}
+
+/** El proveedor oculta el aviso de Inicio hasta la carga `hasta`. Solo su cuenta. */
+export async function marcarDiferenciasVistas({ cuentaId, hasta }) {
+  const { error } = await supabase
+    .from("pp_cuentas")
+    .update({ diferencias_vistas_hasta: hasta })
+    .eq("id", cuentaId);
+
+  if (error) throw new Error(`No se pudo ocultar el aviso: ${error.message}`);
+  return { vistasHasta: hasta };
+}
+
 /** Compras marca una factura+ítem como corregida o la vuelve a pendiente. */
 export async function marcarSeguimiento({ doctoCausacion, item, estado, nota, admin, ip }) {
   const fila = {

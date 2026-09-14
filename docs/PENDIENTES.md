@@ -47,10 +47,11 @@ queda es de otros — y subir el frontend.**
 - **Grupos de sucursales hermanas (007)** — ⏳ 30 sugeridos, **0 activos**:
   esperan que compras confirme cuáles replican precio
 - **§9 Diferencias de costo** — ✅ código, migración `011` y variables en Vercel
-  (2026-09-14). ⏳ **Probar desplegado**: que Vercel llegue a la réplica y el
-  primer "Marcar cotización corregida" real. Ver la lista de §9
-- **§10 Interfaz del portal** — ✅ tablas, colores, identidad del proveedor y
-  selección en dos pasos (2026-09-14). ⏳ Bandeja del admin en laptop
+  (2026-09-14). ✅ aviso en Inicio y exportar a Excel. ⏳ **Correr la migración
+  `012`** y **probar desplegado**: que Vercel llegue a la réplica y el primer
+  "Marcar cotización corregida" real. Ver la lista de §9
+- **§10 Interfaz del portal** — ✅ tablas, colores, identidad del proveedor,
+  selección en dos pasos y bandeja del admin como tabla en laptop (2026-09-14)
 
 ⚠️ **Antes de prender §1.4**, decidir qué pasa con las dos cuentas de prueba de
 Altipal, que siguen activas. Ver §4.
@@ -1634,6 +1635,11 @@ solo su sucursal, en modo lectura.
 
 ### ⏳ Lo que falta — en este orden
 
+0. **Correr `sql/012_diferencias_vistas.sql`** en Supabase y después
+   `NOTIFY pgrst, 'reload schema';`. Agrega `pp_cuentas.diferencias_vistas_hasta`
+   para el aviso de Inicio. **Sin ella el portal no se rompe**: el aviso se
+   muestra siempre y "Ocultar este aviso" responde un error — `leerVistasHasta()`
+   no lanza a propósito.
 1. **Comprobar que Vercel llega a `2.25.203.152:6543`.** Desde la PC de Johan
    conecta; desde Vercel **no está verificado**. Abrir "Diferencias de costo" en
    producción: si responde *"No se pudo consultar la información de SIESA"* (502),
@@ -1651,16 +1657,29 @@ solo su sucursal, en modo lectura.
    CAS-00007514 por $809.461. Da costo negativo; la pantalla lo marca "Revisar en
    SIESA".
 
-### 💡 Pedidos abiertos que salieron en la conversación, sin decidir
+### ✅ Hecho el 2026-09-14, después de subir
 
-- **Avisar al proveedor.** Johan: *"si algo está mal calculado, a ellos se les
-  debe avisar, en la pestaña de inicio o en otra pestaña"*. Hoy hay pestaña y
-  contador en el sidebar; **no hay aviso en Inicio ni por correo**. Decidir cuál.
+- **Aviso en Inicio del proveedor** — Johan: *"un aviso importante en la zona de
+  inicio, pero que sea quitable, no invasivo permanente"*. Ámbar, arriba de las
+  métricas, con "Revisar diferencias" y "Ocultar este aviso".
+  - **Ocultar se guarda en la BASE** (`pp_cuentas.diferencias_vistas_hasta`,
+    migración 012), no en el navegador: la lección de la 010.
+  - **No es permanente**: guarda la carga de la réplica que el proveedor estaba
+    viendo, y el aviso vuelve si llega un ajuste con `carga_ajuste` posterior.
+    Las dos marcas salen del reloj de la réplica y se comparan como texto — ver
+    la cabecera de `sql/012_diferencias_vistas.sql`.
+  - Lo corregido por compras no cuenta. Sin correo: no se pidió.
+  - Front: `utils/avisoDiferencias.js` (+ 10 tests), `components/InicioProveedor.jsx`.
+    Back: `POST /api/proveedor/diferencias-costo/visto`.
+- **Exportar a Excel** en la pantalla del admin. Exporta **lo filtrado**, y el
+  botón dice cuántas filas. Montos como número, "Revisar en SIESA" y el reparto
+  como columnas, fecha del seguimiento en día de Colombia.
+  `utils/exportarDiferencias.js` (+ 8 tests).
+
+### 💡 Pedidos abiertos
+
 - **Devoluciones (CDP) por motivo.** María José: se omiten del costo, pero *"se
-  va a usar para hacer analítica por motivo"*. No hay nada hecho.
-- **Exportar a Excel** la pantalla del admin, como la bandeja
-  (`utils/exportarBandeja.js`). No se pidió; es lo primero que va a extrañar quien
-  venía del Excel.
+  va a usar para hacer analítica por motivo"*. Johan, 2026-09-14: **aún no**.
 - **Causación CDN.** María José dijo "omitirlas" (4.898 entradas en la base). Si
   cambia de criterio, es sumar `"CDN"` a `CAUSACIONES` en
   `services/diferenciasCosto.js`.
@@ -1725,13 +1744,30 @@ antes de que María José presente el proyecto.
 | **Tablas como tabla en laptop**: el corte a tarjetas bajó de 1200 a 900 (catálogo, firma) y de 1050 a 760 (solicitudes) | `components/FilaCotizacion.css`, `ProveedorPanel.css`, `components/FirmarPaquete.css` | Con el corte en 1200, en una laptop con sidebar el proveedor **nunca** veía la tabla |
 | **Selección en dos pasos** (patrón Gmail): la casilla marca la página; una barra ofrece "Seleccionar 100 de los 1.237" y "Quitar selección" | `utils/seleccionFiltro.js` (+ 14 tests), `ProveedorPanel.jsx` | **La barra no es opcional.** Marcar por página sin barra ya falló (creían tener 40 y tenían 25); marcar el resultado entero falló al revés (100 marcados, 25 visibles). La acción se decide por el estado, nunca por `e.target.checked` |
 
-### ⏳ Lo que queda de interfaz
+### ✅ Bandeja del admin en laptop (2026-09-14, después de subir)
 
-- **Bandeja del admin en laptop.** Sigue pasando a tarjetas bajo 1200 px de
-  contenedor, así que en una laptop el admin ve tarjetas. No se bajó porque tiene
-  10 columnas y no se probó con datos reales. Probar a 1100 px y, si se lee, bajar
-  el primer `@container pp-bandeja (max-width: 1200px)` de
-  `components/BandejaAprobaciones.css` (hay dos: líneas y paquetes).
+Pasaba a tarjetas bajo 1200 px de contenedor: en una laptop el admin nunca veía la
+tabla. Ahora, en `components/BandejaAprobaciones.css`:
+
+| Ancho del contenedor | Solicitudes (7 col.) | Líneas (10 col.) |
+|---|---|---|
+| ≥ 960 px | tabla | tabla |
+| 760 – 960 px | tabla | tabla **desplazable a lo ancho** (`min-width: 60rem`) |
+| ≤ 760 px | tarjetas | tarjetas |
+
+Diez columnas apretadas no se leen, y en tarjetas no se comparan precios fila
+contra fila —que es el trabajo de esa pantalla—: por eso en el tramo intermedio se
+desplaza en vez de apretarse o pasar a tarjetas.
+
+⚠️ **Al pasar a tabla apareció un defecto que ya estaba en pantallas anchas**:
+"UND" se partía en "UN/D", la fecha en "15/10/20/26" y el título "Elegir" en
+"EL/EG/IR". Dos causas juntas: el relleno compartido de 0,75 rem se comía las
+columnas de 4–8 %, y `overflow-wrap: anywhere` corta en cualquier letra. Se
+arregló con relleno compacto en la bandeja, `overflow-wrap: break-word` (solo
+corta una palabra que no entra en ninguna línea), anchos de columna reajustados
+y el título "Elegir" solo para lector de pantalla. **No volver a poner
+`anywhere` en celdas con unidades, fechas o códigos.**
+
 - **Cómo se verificó sin sesión**, para repetirlo: inyectar HTML con las clases
   reales en el servidor de desarrollo e importar las hojas con
   `await import('/src/pages/PortalProveedores/…css')`, a 1600, 1100 y 760 px.

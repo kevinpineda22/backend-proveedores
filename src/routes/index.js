@@ -92,6 +92,13 @@ rProveedor.get(
   validar(esquemas.rangoDiferencias, "query"),
   diferencias.listarProveedor,
 );
+/* Ocultar el aviso de Inicio hasta que haya diferencias nuevas (migración 012).
+   Sin `puedeProponer`, por lo mismo que las vistas de solicitudes. */
+rProveedor.post(
+  "/diferencias-costo/visto",
+  validar(esquemas.diferenciasVistas),
+  diferencias.marcarVisto,
+);
 router.use("/proveedor", rProveedor);
 
 /* ── ADMIN ────────────────────────────────────────────────────────────────── */

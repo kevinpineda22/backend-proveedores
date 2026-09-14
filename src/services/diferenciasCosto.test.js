@@ -215,7 +215,9 @@ test("aFila arma la llave y no pierde la fecha como texto", () => {
     unidades: "2", unidades_pagadas: "2", bruto: "8248", descuentos: "322", ico: "0", ibua: "0",
     iva_pct: "19", unidades_pagadas_factura: "162", total_cas: "94276", total_cae: null,
     documentos_ajuste: ["CAS-00004122"], fecha_ajuste: "2025-11-24",
+    carga_ajuste: "2025-11-24 19:26:59",
   });
+  assert.equal(f.cargaAjuste, "2025-11-24 19:26:59", "la carga viaja: decide si el aviso de Inicio es nuevo");
   assert.equal(f.clave, "CFP-00260995|185904|CEA-00293184");
   assert.equal(f.fecha, "2025-11-20");
   assert.equal(f.costoReal, 3381.05);

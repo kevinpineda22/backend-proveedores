@@ -166,6 +166,13 @@ export const esquemas = {
     hasta: fechaISO.optional(),
   }),
 
+  /** POST /api/proveedor/diferencias-costo/visto — gemelo del CHECK de sql/012 */
+  diferenciasVistas: z.object({
+    hasta: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, "Formato AAAA-MM-DD HH:MM:SS"),
+  }),
+
   /** GET /api/admin/diferencias-costo — el admin además puede filtrar un NIT */
   rangoDiferenciasAdmin: z.object({
     desde: fechaISO.optional(),

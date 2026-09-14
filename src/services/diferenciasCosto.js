@@ -211,7 +211,10 @@ WITH ajustes AS MATERIALIZED (
          sum(valor_bruto_local - valor_dsctos_local) FILTER (WHERE left(documento,3) = 'CAS') AS total_cas,
          sum(valor_bruto_local - valor_dsctos_local) FILTER (WHERE left(documento,3) = 'CAE') AS total_cae,
          array_agg(DISTINCT documento ORDER BY documento) AS documentos_ajuste,
-         to_char(min(fecha), 'YYYY-MM-DD') AS fecha_ajuste
+         to_char(min(fecha), 'YYYY-MM-DD') AS fecha_ajuste,
+         -- Cuándo LLEGÓ el ajuste a la réplica (no la fecha del documento). Es lo
+         -- que decide si el aviso de Inicio es nuevo para el proveedor.
+         to_char(max(fecha_carga), 'YYYY-MM-DD HH24:MI:SS') AS carga_ajuste
   FROM merkahorro_siesa.compras
   WHERE left(documento,3) IN ('CAS','CAE')
     AND estado = 'Facturado'
@@ -220,7 +223,7 @@ WITH ajustes AS MATERIALIZED (
   GROUP BY docto_causacion, item
 ),
 entradas AS MATERIALIZED (
-  SELECT c.*, a.total_cas, a.total_cae, a.documentos_ajuste, a.fecha_ajuste
+  SELECT c.*, a.total_cas, a.total_cae, a.documentos_ajuste, a.fecha_ajuste, a.carga_ajuste
   FROM merkahorro_siesa.compras c
   JOIN ajustes a USING (docto_causacion, item)
   WHERE left(c.documento,3) = 'CEA'
@@ -235,6 +238,7 @@ por_entrada AS MATERIALIZED (
          max(total_cae) AS total_cae,
          (array_agg(documentos_ajuste))[1] AS documentos_ajuste,
          max(fecha_ajuste) AS fecha_ajuste,
+         max(carga_ajuste) AS carga_ajuste,
          btrim(max(desc_item)) AS descripcion,
          max(btrim(proveedor)) AS nit,
          max(btrim(sucursal)) AS sucursal,
@@ -271,7 +275,7 @@ SELECT e.documento, e.docto_causacion, e.item,
        e.bodega, e.nombre_bodega, e.docto_orden, e.presentacion, e.unidad,
        e.unidades, e.unidades_pagadas, e.bruto, e.descuentos, e.ico, e.ibua, e.iva_pct,
        sum(e.unidades_pagadas) OVER (PARTITION BY e.docto_causacion, e.item) AS unidades_pagadas_factura,
-       e.total_cas, e.total_cae, e.documentos_ajuste, e.fecha_ajuste,
+       e.total_cas, e.total_cae, e.documentos_ajuste, e.fecha_ajuste, e.carga_ajuste,
        e.dia
 FROM por_entrada e
 `;
@@ -283,14 +287,19 @@ export const SQL_DIFERENCIAS = `
 SELECT documento, docto_causacion, item, fecha, descripcion, nit, sucursal, razon_social,
        nombre_sucursal, bodega, nombre_bodega, docto_orden, presentacion, unidad, unidades,
        unidades_pagadas, bruto, descuentos, ico, ibua, iva_pct, unidades_pagadas_factura,
-       total_cas, total_cae, documentos_ajuste, fecha_ajuste
+       total_cas, total_cae, documentos_ajuste, fecha_ajuste, carga_ajuste
 FROM (${SQL_POR_ENTRADA}) t
 WHERE t.dia >= $1::date AND t.dia < $2::date
 ORDER BY t.dia DESC, t.razon_social, t.docto_causacion, t.item, t.documento
 `;
 
-/** Hasta cuándo cargó la réplica. El ETL no es nuestro: se muestra, no se arregla. */
-export const SQL_ACTUALIZADO = `SELECT to_char(max(fecha_carga), 'YYYY-MM-DD HH24:MI') AS actualizado FROM merkahorro_siesa.compras`;
+/** Hasta cuándo cargó la réplica. El ETL no es nuestro: se muestra, no se arregla.
+ *
+ * Con SEGUNDOS y en el mismo formato que `carga_ajuste`: el proveedor oculta el
+ * aviso de Inicio "hasta" este valor, y se compara como texto contra la carga de
+ * cada ajuste. Los dos salen del reloj de la réplica, así que no hay husos de
+ * por medio — mezclarlo con el `now()` de Supabase sí los tendría. */
+export const SQL_ACTUALIZADO = `SELECT to_char(max(fecha_carga), 'YYYY-MM-DD HH24:MI:SS') AS actualizado FROM merkahorro_siesa.compras`;
 
 /** Fila cruda de la consulta → lo que viaja a la pantalla. */
 export function aFila(r) {
@@ -324,6 +333,7 @@ export function aFila(r) {
     unidad: r.unidad,
     documentosAjuste: r.documentos_ajuste ?? [],
     fechaAjuste: r.fecha_ajuste,
+    cargaAjuste: r.carga_ajuste ?? null,
     ivaPct: r.iva_pct == null ? null : Number(r.iva_pct),
     ...calculo,
   };
