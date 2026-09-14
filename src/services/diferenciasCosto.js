@@ -236,7 +236,12 @@ por_entrada AS MATERIALIZED (
          min(fecha)::date AS dia,
          max(total_cas) AS total_cas,
          max(total_cae) AS total_cae,
-         (array_agg(documentos_ajuste))[1] AS documentos_ajuste,
+         -- max() y NO (array_agg(...))[1]: documentos_ajuste YA es un arreglo, y
+         -- array_agg de arreglos arma uno de DOS dimensiones — un solo índice sobre
+         -- eso devuelve NULL. Pasó en producción el 2026-09-14: la columna salía
+         -- vacía en pantalla y en el Excel. Es el mismo arreglo en todo el grupo
+         -- (sale del JOIN con ajustes), así que max() lo devuelve tal cual.
+         max(documentos_ajuste) AS documentos_ajuste,
          max(fecha_ajuste) AS fecha_ajuste,
          max(carga_ajuste) AS carga_ajuste,
          btrim(max(desc_item)) AS descripcion,

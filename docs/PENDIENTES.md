@@ -1633,9 +1633,58 @@ solo su sucursal, en modo lectura.
 | Código | ✅ backend y frontend listos; Johan lo sube para que María José presente el proyecto |
 | Tests | 350 backend · 318 frontend del portal, verdes |
 
+### ✅ Verificado CON SESIÓN de admin — 2026-09-14
+
+Johan inició sesión en el navegador del panel (localhost:5173, apuntando al
+backend de producción) y Claude recorrió las pantallas.
+
+| Prueba | Resultado |
+|---|---|
+| Vercel llega a la réplica `2.25.203.152:6543` | ✅ 2.511 entradas en **2,36 s**, `seguimientoDisponible: true` |
+| Despliegue del backend | ✅ Vercel marca `dc96516` como *Deployment has completed* (API pública de GitHub) |
+| Migración `012` | ✅ la columna existe; todas las cuentas en `NULL` |
+| Marcar "Cotización corregida" | ✅ fila en `pp_diferencias_seguimiento` con `actualizado_por`, entrada en `pp_auditoria`, **sobrevive a la recarga**, el contador baja 2.498 → 2.497 |
+| Volver a pendiente | ✅ fila en `pendiente`, nota `null`, segunda entrada de auditoría. **La prueba se revirtió**: no quedó ningún dato falso. En `pp_auditoria` quedan las dos acciones sobre `CFP-00309883|927` con la nota "Prueba técnica de Claude" |
+| Excel con datos reales | ✅ 33 columnas, montos como número — armado en memoria, sin descargar |
+| Bandeja a 1280 px | ✅ tabla (contenedor 982 px). Sin solicitudes pendientes: no se vio con filas |
+| Palabras cortadas en celdas | ✅ 0 en diferencias (286 celdas) y en la bandeja, con un detector que se probó forzando una columna angosta |
+
+### ✅ Verificado CON SESIÓN de proveedor (Altipal 006, cuenta 59) — 2026-09-14
+
+| Prueba | Resultado |
+|---|---|
+| Aviso en Inicio | ✅ "152 productos se facturaron con un valor distinto al de la orden de compra · 66 por encima y 86 por debajo · entradas del 16/06/2026 al 09/09/2026" |
+| Identidad arriba del sidebar | ✅ "ALTIPAL SAS · NIT 800186960 · Sucursal 006 — ALTIPAL CATALOGO GENERAL" |
+| Aislamiento | ✅ las 153 filas son todas 800186960/006; del seguimiento solo viajan `estado` y `actualizadoAt` — la nota y quién marcó **no salen del backend** |
+| Ocultar el aviso | ✅ desaparece, se guarda `diferencias_vistas_hasta = "2026-09-14 17:29:01"` en la cuenta 59 (la 009 no se tocó) y **sigue oculto después de recargar** |
+| Vuelve si llega algo nuevo | ✅ simulado poniendo la marca un segundo antes (`17:29:00`): reapareció con **26** productos, 16/10, 05/09–09/09. Contado contra la API: son exactamente las filas pendientes con `carga_ajuste = 2026-09-14 17:29:01`. Las otras 126 se cargaron entre el 01-09 y el 02-09: el ETL carga por tandas, y la regla compara carga por carga |
+
+**La cuenta 59 quedó en `NULL`**, como estaba antes de probar: el aviso se ve
+completo (152) para la presentación.
+
+⚠️ Lo que la prueba confirmó sin querer: con el backend desplegado, las 153 filas
+del proveedor traían `documentosAjuste` vacío — el bug de abajo está en
+producción hasta que se suba el arreglo.
+
+#### 🐛 Encontrado en la prueba y arreglado: "Documentos de ajuste" vacío
+
+En producción la columna salía vacía en pantalla ("Ajustes de la factura: ·
+14/09/2026", sin el CAS) y en el Excel. La causa fue la optimización del SQL:
+`(array_agg(documentos_ajuste))[1]` sobre un campo que YA es arreglo arma uno de
+dos dimensiones, y un solo índice devuelve `NULL`. Ahora `max(documentos_ajuste)`.
+Verificado contra la base: **0 de 2.511** filas sin documentos, y ABURRA ítem 927
+trae `CAS-00007784`. ⚠️ **Hay que subir el backend** para que llegue a producción.
+
+La verificación después de optimizar contó filas y tiempos pero no miró ese
+campo. Por eso no se vio: un chequeo solo prueba lo que mira.
+
+#### 🐛 También: "PRODUCTOS" se partía en "PRODUCT/OS"
+
+En la lista de solicitudes de la bandeja, a 1280 px. Columna de 8 % → 10 %.
+
 ### ⏳ Lo que falta — en este orden
 
-0. **Correr `sql/012_diferencias_vistas.sql`** en Supabase y después
+0. **Correr `sql/012_diferencias_vistas.sql`** — ✅ corrida el 2026-09-14 en Supabase y después
    `NOTIFY pgrst, 'reload schema';`. Agrega `pp_cuentas.diferencias_vistas_hasta`
    para el aviso de Inicio. **Sin ella el portal no se rompe**: el aviso se
    muestra siempre y "Ocultar este aviso" responde un error — `leerVistasHasta()`
