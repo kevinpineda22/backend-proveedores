@@ -154,6 +154,16 @@ export function calcularFila(f) {
   const costoEntrada = bonificada ? null : base / pagadas;
   const costoReal = bonificada ? null : (base + ajusteAsignado) / pagadas;
 
+  /* LA MISMA CUENTA EN LA U.M. DEL DOCUMENTO (Johan, 2026-09-14: "mostrar su
+     respectiva unidad de medida"). Es la que se compara con la cotización de
+     SIESA, que se guarda por U.M.: ítem 175061 en P48 cuesta $9.526, no $198,46.
+     El REPARTO del ajuste sigue en unidades sueltas: es lo único que se suma entre
+     entradas con presentaciones distintas. Sin cantidad en U.M. (datos viejos,
+     tests), cae a unidades — para UND y KL las dos son la misma. */
+  const cantidadUm = num(f.cantidadUm ?? f.unidades);
+  const cantidadUmPagada = num(f.cantidadUmPagada ?? f.unidadesPagadas);
+  const divisorUm = bonificada || cantidadUmPagada <= 0 ? null : cantidadUmPagada;
+
   return {
     unidades: redondear(unidades, 4),
     unidadesPagadas: redondear(pagadas, 4),
@@ -178,6 +188,17 @@ export function calcularFila(f) {
        unidad que entra, se haya pagado o no. Mismo criterio que el Excel. */
     icoUnitario: unidades > 0 ? redondear(num(f.ico) / unidades) : null,
     ibuaUnitario: unidades > 0 ? redondear(num(f.ibua) / unidades) : null,
+
+    // Por U.M. del documento.
+    cantidadUm: redondear(cantidadUm, 4),
+    cantidadUmPagada: redondear(cantidadUmPagada, 4),
+    cantidadUmBonificada: redondear(cantidadUm - cantidadUmPagada, 4),
+    precioListaUm: divisorUm ? redondear(bruto / divisorUm) : null,
+    costoEntradaUm: divisorUm ? redondear(base / divisorUm) : null,
+    ajusteUnitarioUm: divisorUm ? redondear(ajusteAsignado / divisorUm) : null,
+    costoRealUm: divisorUm ? redondear((base + ajusteAsignado) / divisorUm) : null,
+    icoUnitarioUm: cantidadUm > 0 ? redondear(num(f.ico) / cantidadUm) : null,
+    ibuaUnitarioUm: cantidadUm > 0 ? redondear(num(f.ibua) / cantidadUm) : null,
   };
 }
 
@@ -256,6 +277,33 @@ por_entrada AS MATERIALIZED (
          max(btrim(um_inv)) AS unidad,
          sum(cantidad) AS unidades,
          sum(cantidad) FILTER (WHERE valor_bruto_local > 0) AS unidades_pagadas,
+         -- ⚠️ EN ESTA RÉPLICA LOS NOMBRES ESTÁN CRUZADOS CON LOS VALORES.
+         -- um_inv dice UND, pero cantidad_inv trae la cantidad en la U.M. DEL
+         -- DOCUMENTO (um), y cantidad las unidades sueltas. Medido el 2026-09-14
+         -- sobre 3 meses: en TODAS las filas P (P6 2.211/2.211, P48 110/110…)
+         -- precio_unit_local = bruto ÷ cantidad_inv, nunca ÷ cantidad; y coincide
+         -- con la cotización de SIESA de esa U.M. (CEA-00348223, ítem 175061:
+         -- 720 und = 15 P48, bruto ÷ 15 = $9.526 = cotización P48). Confirmado por
+         -- María José en SIESA. Mostrar cantidad junto a um diría "720 P48".
+         -- NO "arreglar" el nombre. (Sin comillas invertidas en este comentario:
+         -- el SQL vive dentro de una plantilla de JavaScript y la cortarían.)
+         --
+         -- UNA EXCEPCIÓN MEDIDA: con paquetes FRACCIONARIOS, cantidad_inv viene
+         -- REDONDEADA. 16 unidades en P3 son 5,33 paquetes y dice 5; 3 en P2 son
+         -- 1,5 y dice 2. El precio unitario de SIESA sí está sobre la cantidad
+         -- exacta (CEA-00336232: $27.927 / $18.618 = 1,5). En toda la tabla son 9
+         -- de 34.908 renglones P; con cantidad_inv literal, el costo por P2 de esa
+         -- entrada salía 30 % más bajo. Regla: si las unidades no llenan paquetes
+         -- enteros, unidades / factor de la U.M. (P3 = 3); si no, cantidad_inv.
+         -- Acierta en los 9 casos y deja igual todos los demás.
+         sum(CASE WHEN btrim(um) ~ '^P[0-9]+$'
+                   AND mod(cantidad, substring(btrim(um) from 2)::numeric) <> 0
+                  THEN cantidad / substring(btrim(um) from 2)::numeric
+                  ELSE cantidad_inv END) AS cantidad_um,
+         sum(CASE WHEN btrim(um) ~ '^P[0-9]+$'
+                   AND mod(cantidad, substring(btrim(um) from 2)::numeric) <> 0
+                  THEN cantidad / substring(btrim(um) from 2)::numeric
+                  ELSE cantidad_inv END) FILTER (WHERE valor_bruto_local > 0) AS cantidad_um_pagada,
          sum(valor_bruto_local) AS bruto,
          sum(valor_dsctos_local) AS descuentos,
          sum(vlr_imp_ico) AS ico,
@@ -278,7 +326,8 @@ SELECT e.documento, e.docto_causacion, e.item,
        to_char(e.dia, 'YYYY-MM-DD') AS fecha,
        e.descripcion, e.nit, e.sucursal, e.razon_social, e.nombre_sucursal,
        e.bodega, e.nombre_bodega, e.docto_orden, e.presentacion, e.unidad,
-       e.unidades, e.unidades_pagadas, e.bruto, e.descuentos, e.ico, e.ibua, e.iva_pct,
+       e.unidades, e.unidades_pagadas, e.cantidad_um, e.cantidad_um_pagada,
+       e.bruto, e.descuentos, e.ico, e.ibua, e.iva_pct,
        sum(e.unidades_pagadas) OVER (PARTITION BY e.docto_causacion, e.item) AS unidades_pagadas_factura,
        e.total_cas, e.total_cae, e.documentos_ajuste, e.fecha_ajuste, e.carga_ajuste,
        e.dia
@@ -291,7 +340,7 @@ FROM por_entrada e
 export const SQL_DIFERENCIAS = `
 SELECT documento, docto_causacion, item, fecha, descripcion, nit, sucursal, razon_social,
        nombre_sucursal, bodega, nombre_bodega, docto_orden, presentacion, unidad, unidades,
-       unidades_pagadas, bruto, descuentos, ico, ibua, iva_pct, unidades_pagadas_factura,
+       unidades_pagadas, cantidad_um, cantidad_um_pagada, bruto, descuentos, ico, ibua, iva_pct, unidades_pagadas_factura,
        total_cas, total_cae, documentos_ajuste, fecha_ajuste, carga_ajuste
 FROM (${SQL_POR_ENTRADA}) t
 WHERE t.dia >= $1::date AND t.dia < $2::date
@@ -314,6 +363,8 @@ export function aFila(r) {
     unidades: r.unidades,
     unidadesPagadas: r.unidades_pagadas,
     unidadesPagadasFactura: r.unidades_pagadas_factura,
+    cantidadUm: r.cantidad_um,
+    cantidadUmPagada: r.cantidad_um_pagada,
     totalCas: r.total_cas,
     totalCae: r.total_cae,
     ico: r.ico,

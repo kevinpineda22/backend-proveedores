@@ -80,6 +80,49 @@ describe("las unidades bonificadas NO diluyen el costo", () => {
   });
 });
 
+describe("la cuenta en la U.M. del documento", () => {
+  // Ítem 175061, real: 6 P48 = 288 unidades, bruto $57.156. Cotización SIESA P48 = $9.526.
+  const P48 = {
+    bruto: 57156, descuentos: 0, unidades: 288, unidadesPagadas: 288,
+    cantidadUm: 6, cantidadUmPagada: 6, unidadesPagadasFactura: 288,
+    totalCas: 0, totalCae: 2880, ico: 600,
+  };
+
+  test("el costo por U.M. es el que se compara con la cotización de SIESA", () => {
+    const r = calcularFila(P48);
+    assert.equal(r.precioListaUm, 9526, "= cotización P48");
+    assert.equal(r.costoEntradaUm, 9526);
+    assert.equal(r.costoEntrada, 198.46, "por UND, la misma entrada");
+    assert.equal(r.cantidadUmPagada, 6);
+  });
+
+  test("el ajuste se reparte en unidades pero se informa también por U.M.", () => {
+    const r = calcularFila(P48);
+    assert.equal(r.ajusteUnitarioUm, 480, "2.880 ÷ 6 P48");
+    assert.equal(r.costoRealUm, 10006);
+    assert.equal(r.costoReal, 208.46, "10.006 ÷ 48");
+  });
+
+  test("ICO por U.M.: 600 ÷ 6 P48", () => {
+    assert.equal(calcularFila(P48).icoUnitarioUm, 100);
+  });
+
+  test("sin cantidad en U.M. (UND, KL), por U.M. = por unidad", () => {
+    const r = calcularFila({
+      bruto: 8248, descuentos: 322, unidades: 2, unidadesPagadas: 2,
+      unidadesPagadasFactura: 162, totalCas: 94276, totalCae: 0,
+    });
+    assert.equal(r.costoRealUm, r.costoReal);
+    assert.equal(r.cantidadUmPagada, 2);
+  });
+
+  test("bonificada: tampoco hay costo por U.M.", () => {
+    const r = calcularFila({ ...P48, bruto: 0, unidadesPagadas: 0, cantidadUmPagada: 0 });
+    assert.equal(r.costoRealUm, null);
+    assert.equal(r.cantidadUmBonificada, 6);
+  });
+});
+
 describe("un ajuste que no cuadra con la entrada se marca, no se esconde", () => {
   test("CAS mayor que el valor de la entrada → revisar (caso real CFP-00307879 · 2017)", () => {
     const r = calcularFila({
