@@ -273,6 +273,13 @@ por_entrada AS MATERIALIZED (
          string_agg(DISTINCT btrim(bodega), ', ') AS bodega,
          string_agg(DISTINCT desc_bodega, ', ') AS nombre_bodega,
          string_agg(DISTINCT docto_orden, ', ') AS docto_orden,
+         -- El número de factura del PROVEEDOR (FVB 30054, FVCE825110…), no el
+         -- consecutivo de SIESA. Es el único dato que el proveedor reconoce al
+         -- teléfono. Medido el 2026-09-15: viene en el 98,8 % de las CEA de los
+         -- últimos 3 meses (1.925 vacías de 156.002), así que la pantalla tiene
+         -- que aguantar que falte. nullif() evita que un '' se cuele como una
+         -- coma suelta cuando la entrada agrupa varios renglones.
+         string_agg(DISTINCT nullif(btrim(docto_referencia), ''), ', ') AS docto_referencia,
          max(btrim(um)) AS presentacion,
          max(btrim(um_inv)) AS unidad,
          sum(cantidad) AS unidades,
@@ -325,7 +332,7 @@ por_entrada AS MATERIALIZED (
 SELECT e.documento, e.docto_causacion, e.item,
        to_char(e.dia, 'YYYY-MM-DD') AS fecha,
        e.descripcion, e.nit, e.sucursal, e.razon_social, e.nombre_sucursal,
-       e.bodega, e.nombre_bodega, e.docto_orden, e.presentacion, e.unidad,
+       e.bodega, e.nombre_bodega, e.docto_orden, e.docto_referencia, e.presentacion, e.unidad,
        e.unidades, e.unidades_pagadas, e.cantidad_um, e.cantidad_um_pagada,
        e.bruto, e.descuentos, e.ico, e.ibua, e.iva_pct,
        sum(e.unidades_pagadas) OVER (PARTITION BY e.docto_causacion, e.item) AS unidades_pagadas_factura,
@@ -339,7 +346,7 @@ FROM por_entrada e
    factura perdería las entradas de fuera del rango. Ver la advertencia de arriba. */
 export const SQL_DIFERENCIAS = `
 SELECT documento, docto_causacion, item, fecha, descripcion, nit, sucursal, razon_social,
-       nombre_sucursal, bodega, nombre_bodega, docto_orden, presentacion, unidad, unidades,
+       nombre_sucursal, bodega, nombre_bodega, docto_orden, docto_referencia, presentacion, unidad, unidades,
        unidades_pagadas, cantidad_um, cantidad_um_pagada, bruto, descuentos, ico, ibua, iva_pct, unidades_pagadas_factura,
        total_cas, total_cae, documentos_ajuste, fecha_ajuste, carga_ajuste
 FROM (${SQL_POR_ENTRADA}) t
@@ -384,6 +391,7 @@ export function aFila(r) {
     bodega: r.bodega,
     nombreBodega: r.nombre_bodega,
     doctoOrden: r.docto_orden,
+    nroFactura: r.docto_referencia ?? null,
     fecha: r.fecha,
     presentacion: r.presentacion,
     unidad: r.unidad,
