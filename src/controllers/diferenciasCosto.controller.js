@@ -3,6 +3,7 @@ import { createError, createErrorExpuesto } from "../middleware/errorHandler.js"
 import {
   CAUSACIONES,
   SQL_ACTUALIZADO,
+  SQL_AJUSTES_SIN_ENTRADA,
   SQL_DIFERENCIAS,
   aFila,
   diaSiguiente,
@@ -23,13 +24,25 @@ import {
  *
  * `nit` y `sucursal` en null = todos. Para el proveedor salen SIEMPRE de
  * `req.cuenta` (el JWT), nunca del query: ver ARQUITECTURA §5.
+ *
+ * `contarSinEntrada`: solo compras. Cuenta los ajustes que la réplica dejó sin
+ * entrada (ver `SQL_AJUSTES_SIN_ENTRADA`). Si ese conteo falla, la tabla sale
+ * igual con `ajustesSinEntrada: null`: es un aviso, no el dato principal.
  */
-async function diferencias({ query, nit = null, sucursal = null }) {
+async function diferencias({ query, nit = null, sucursal = null, contarSinEntrada = false }) {
   const rango = normalizarRango({ desde: query.desde, hasta: query.hasta });
   if (!rango.ok) throw createError(422, rango.mensaje);
 
   let crudas;
   let actualizado = null;
+  const sinEntrada = contarSinEntrada
+    ? consultarSoloLectura(SQL_AJUSTES_SIN_ENTRADA, [rango.desde, diaSiguiente(rango.hasta), [...CAUSACIONES]])
+        .then(([r]) => r ?? null)
+        .catch((e) => {
+          console.error(`[diferencias] falló el conteo de ajustes sin entrada: ${e.message}`);
+          return null;
+        })
+    : Promise.resolve(null);
   try {
     [crudas, [{ actualizado } = {}]] = await Promise.all([
       consultarSoloLectura(SQL_DIFERENCIAS, [
@@ -51,7 +64,10 @@ async function diferencias({ query, nit = null, sucursal = null }) {
   }
 
   const filas = crudas.map(aFila);
-  const { mapa, disponible } = await leerSeguimiento(filas.map((f) => f.doctoCausacion));
+  const [{ mapa, disponible }, ajustesSinEntrada] = await Promise.all([
+    leerSeguimiento(filas.map((f) => f.doctoCausacion)),
+    sinEntrada,
+  ]);
 
   return {
     rango: { desde: rango.desde, hasta: rango.hasta, minimo: rango.minimo, maximo: rango.maximo },
@@ -59,6 +75,9 @@ async function diferencias({ query, nit = null, sucursal = null }) {
     // la pantalla tiene que decirlo en vez de mostrar datos viejos como vigentes.
     actualizado,
     seguimientoDisponible: disponible,
+    // { productos, facturas } o null. Ajustes que no se pueden mostrar porque su
+    // entrada no llegó facturada a la réplica.
+    ajustesSinEntrada,
     filas: combinar(filas, mapa),
   };
 }
@@ -66,7 +85,9 @@ async function diferencias({ query, nit = null, sucursal = null }) {
 /** GET /api/admin/diferencias-costo?desde&hasta&nit */
 export async function listarAdmin(req, res, next) {
   try {
-    res.json(await diferencias({ query: req.query, nit: req.query.nit || null }));
+    res.json(
+      await diferencias({ query: req.query, nit: req.query.nit || null, contarSinEntrada: !req.query.nit }),
+    );
   } catch (e) {
     next(e);
   }
@@ -81,8 +102,10 @@ export async function listarProveedor(req, res, next) {
     ]);
     // `vistasHasta` decide el aviso de Inicio (migración 012).
     // Lo de MENOR costo no se le muestra NUNCA al proveedor: ver `visibleParaProveedor`.
+    // El conteo sin entrada no se calcula para el proveedor; se quita por si acaso.
+    const { ajustesSinEntrada: _omitido, ...publico } = r;
     res.json({
-      ...r,
+      ...publico,
       vistasHasta,
       filas: r.filas.filter(visibleParaProveedor).map(paraProveedor),
     });

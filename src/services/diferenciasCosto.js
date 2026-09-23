@@ -354,6 +354,36 @@ WHERE t.dia >= $1::date AND t.dia < $2::date
 ORDER BY t.dia DESC, t.razon_social, t.docto_causacion, t.item, t.documento
 `;
 
+/**
+ * Ajustes (CAS/CAE) del período cuya factura NO tiene ninguna CEA facturada en la
+ * réplica. Esos no pueden salir en `SQL_DIFERENCIAS` —la fila nace de la entrada—
+ * y la pantalla mostraba ceros como si no hubiera diferencias.
+ *
+ * POR QUÉ PASA (medido el 2026-09-23): desde el 2026-09-14 la réplica carga
+ * INCREMENTAL, una vez al día, y solo trae documentos nuevos. Una CEA que se cargó
+ * en "Contabilizado" (sin factura) nunca se vuelve a leer cuando compras la causa:
+ * queda sin `docto_causacion` para siempre, y su ajuste, huérfano. Junio y julio
+ * tienen 0 CEA contabilizadas —se recargaron enteros el 09-01—; agosto 542 y
+ * septiembre 736. Los ajustes traen `docto_orden` en null: no hay otra llave para
+ * aparearlos. El arreglo es del ETL; acá solo se cuenta y se avisa.
+ *
+ * Filtra por la fecha del AJUSTE, no de la entrada: la entrada es justo lo que falta.
+ * $1 desde · $2 hasta EXCLUSIVO · $3 causaciones
+ */
+export const SQL_AJUSTES_SIN_ENTRADA = `
+SELECT count(*)::int AS productos, count(DISTINCT a.docto_causacion)::int AS facturas
+FROM (SELECT DISTINCT docto_causacion, item
+      FROM merkahorro_siesa.compras
+      WHERE left(documento,3) IN ('CAS','CAE')
+        AND estado = 'Facturado'
+        AND left(docto_causacion,3) = ANY($3::text[])
+        AND fecha >= $1::date AND fecha < $2::date) a
+WHERE NOT EXISTS (
+  SELECT 1 FROM merkahorro_siesa.compras c
+  WHERE c.docto_causacion = a.docto_causacion AND c.item = a.item
+    AND left(c.documento,3) = 'CEA' AND c.estado = 'Facturado')
+`;
+
 /** Hasta cuándo cargó la réplica. El ETL no es nuestro: se muestra, no se arregla.
  *
  * Con SEGUNDOS y en el mismo formato que `carga_ajuste`: el proveedor oculta el
