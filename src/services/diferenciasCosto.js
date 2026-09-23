@@ -84,7 +84,7 @@ export function diaSiguiente(fecha) {
 }
 
 /**
- * Valida el rango pedido contra la ventana de 3 meses.
+ * Valida el rango pedido contra la ventana de `meses` (3 por omisión; Devoluciones usa 6).
  *
  * Sin `desde`/`hasta` devuelve la ventana entera. Un rango que se sale de la
  * ventana NO se recorta en silencio: se rechaza diciendo cuál es el límite. Un
@@ -93,9 +93,9 @@ export function diaSiguiente(fecha) {
  *
  * @returns {{ok: true, desde, hasta, minimo, maximo} | {ok: false, mensaje}}
  */
-export function normalizarRango({ desde, hasta } = {}, hoy = hoyEnColombia()) {
+export function normalizarRango({ desde, hasta } = {}, hoy = hoyEnColombia(), meses = MESES_VENTANA) {
   const maximo = hoy;
-  const minimo = restarMeses(hoy, MESES_VENTANA);
+  const minimo = restarMeses(hoy, meses);
   const d = desde || minimo;
   const h = hasta || maximo;
 
@@ -108,7 +108,7 @@ export function normalizarRango({ desde, hasta } = {}, hoy = hoyEnColombia()) {
   if (d < minimo || h > maximo) {
     return {
       ok: false,
-      mensaje: `Solo se pueden consultar los últimos ${MESES_VENTANA} meses: del ${minimo} al ${maximo}.`,
+      mensaje: `Solo se pueden consultar los últimos ${meses} meses: del ${minimo} al ${maximo}.`,
     };
   }
   return { ok: true, desde: d, hasta: h, minimo, maximo };

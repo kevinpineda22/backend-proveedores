@@ -173,6 +173,12 @@ export const esquemas = {
       .regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, "Formato AAAA-MM-DD HH:MM:SS"),
   }),
 
+  /** GET /api/{admin|proveedor}/devoluciones — la ventana de 6 meses la valida el servicio */
+  rangoDevoluciones: z.object({
+    desde: fechaISO.optional(),
+    hasta: fechaISO.optional(),
+  }),
+
   /** GET /api/admin/diferencias-costo — el admin además puede filtrar un NIT */
   rangoDiferenciasAdmin: z.object({
     desde: fechaISO.optional(),

@@ -7,6 +7,7 @@ import * as proveedor from "../controllers/proveedor.controller.js";
 import * as admin from "../controllers/admin.controller.js";
 import { sucursalesPorNit } from "../controllers/publico.controller.js";
 import * as diferencias from "../controllers/diferenciasCosto.controller.js";
+import * as devoluciones from "../controllers/devoluciones.controller.js";
 import { sincronizar } from "../services/snapshot.service.js";
 import { invitar, activar, solicitarRecuperacion } from "../services/invitacion.service.js";
 
@@ -92,6 +93,13 @@ rProveedor.get(
   validar(esquemas.rangoDiferencias, "query"),
   diferencias.listarProveedor,
 );
+/* Devoluciones (CDP) de SU sucursal. Solo lectura, sin `puedeProponer`: igual que
+   diferencias, un proveedor bloqueado también tiene que ver qué se le devolvió. */
+rProveedor.get(
+  "/devoluciones",
+  validar(esquemas.rangoDevoluciones, "query"),
+  devoluciones.listarProveedor,
+);
 /* Ocultar el aviso de Inicio hasta que haya diferencias nuevas (migración 012).
    Sin `puedeProponer`, por lo mismo que las vistas de solicitudes. */
 rProveedor.post(
@@ -156,6 +164,14 @@ rAdmin.put(
   "/diferencias-costo/seguimiento",
   validar(esquemas.marcarSeguimiento),
   diferencias.marcar,
+);
+/* Devoluciones (CDP) de todos los proveedores. Los filtros por proveedor, sede y
+   motivo los aplica la pantalla sobre la respuesta: son instantáneos y no vuelven
+   a leer seis meses de SIESA por cada clic. */
+rAdmin.get(
+  "/devoluciones",
+  validar(esquemas.rangoDevoluciones, "query"),
+  devoluciones.listarAdmin,
 );
 router.use("/admin", rAdmin);
 
