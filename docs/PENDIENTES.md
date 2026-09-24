@@ -987,6 +987,48 @@ cambian los dos. Los dos, o divergen.
 
 ---
 
+### 2.8 · ✅ **RESPONDIDO (2026-09-24)** — Preguntas a María José sobre el tablero de Devoluciones
+
+**Respuesta:** la 3, **mes contra mes** (hecho: último mes COMPLETO vs el anterior;
+el mes en curso no cuenta porque está incompleto). Para todas las demás dijo
+**"sí"**. La 1, la 4 y la 5 ofrecían opciones, así que el "sí" se tomó como "queda
+como está": valor CON impuestos, el ítem comodín 17059 sigue en el ranking, la
+cantidad sigue mezclando unidades y kilos. Si ella quiso otra cosa, es un cambio chico.
+
+Las preguntas, como se mandaron:
+
+El tablero de devoluciones (CDP) se construyó el 2026-09-23 con sus respuestas:
+todos los motivos, 6 meses, notas = `notas_documento`, "todo es crítico",
+compras ve todo y el proveedor solo lo suyo. Quedaron decisiones que tomé yo y
+que ella tiene que confirmar. **Cada una es un cambio chico; ninguna bloquea.**
+
+1. **¿El valor va con o sin impuestos?** Hoy muestra el NETO (con IVA/ICO/IBUA):
+   lo que el proveedor le tiene que reconocer a Merkahorro. Diferencias de costo,
+   en cambio, trabaja ANTES de impuestos. Seis meses: $1.041 M con impuestos,
+   $923 M sin.
+2. **¿El proveedor puede ver las notas de SIESA?** Hoy las ve. Son del tipo
+   "AVERIAS PUNTO", "NO LLEGO"; pero si alguien escribe en la nota un comentario
+   interno, el proveedor lo va a leer.
+3. **¿"Crecimiento" como está?** Hoy compara los últimos 30 días contra los 30
+   anteriores, y ordena por el aumento en PESOS (no por el %: +300 % sobre
+   $10.000 no le importa a nadie). ¿O lo quiere mes contra mes?
+4. **El ítem 17059 "PRODUCTO NO PEDIDO O CODIFICADO IPU 19"** (y el 182405, su
+   par IMPOC 19) no es un producto: es un comodín de SIESA. Es el #1 del ranking
+   por producto en crecimiento ($24,7 M, 233 devoluciones en 6 meses). ¿Se deja,
+   se separa como "sin codificar", o se saca del ranking de productos?
+5. **La cantidad mezcla unidades y kilos.** SIESA no las separa en la réplica, así
+   que el total (147.117) suma las dos. ¿Le sirve así, se separa por unidad de
+   medida, o se saca la cifra y queda solo el valor?
+6. **El motivo 03 "Ajustes de compras mayor valor" y el 07 "Error en impuestos"**
+   (9 documentos en los últimos 3 meses) entran como devoluciones porque ella dijo "todos".
+   ¿Confirma que esos dos también?
+Ya NO se pregunta "sin facturar": depende de la réplica, no de ella, y quien la
+mantiene la va a corregir (2026-09-24). Cuando lo hagan, las CDP "Contabilizado"
+pasan solas a "Facturado" y el rótulo desaparece; el tablero ya cuenta los dos
+estados, así que los totales no cambian.
+
+---
+
 ## 3. LO QUE ESTÁ SIN SUBIR
 
 **Lo dice `git status`, no este archivo.**
