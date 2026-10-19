@@ -42,7 +42,7 @@ export function hostDe(url) {
   }
 }
 
-const urlLectura = () =>
+export const urlLectura = () =>
   process.env.CONNEKTA_BASE_URL || "https://servicios.siesacloud.com/api/connekta/v3";
 
 const urlEscritura = () =>

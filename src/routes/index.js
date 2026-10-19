@@ -8,6 +8,7 @@ import * as admin from "../controllers/admin.controller.js";
 import { sucursalesPorNit } from "../controllers/publico.controller.js";
 import * as diferencias from "../controllers/diferenciasCosto.controller.js";
 import * as devoluciones from "../controllers/devoluciones.controller.js";
+import * as seguimiento from "../controllers/seguimientoSiesa.controller.js";
 import { sincronizar } from "../services/snapshot.service.js";
 import { invitar, activar, solicitarRecuperacion } from "../services/invitacion.service.js";
 
@@ -173,6 +174,12 @@ rAdmin.get(
   validar(esquemas.rangoDevoluciones, "query"),
   devoluciones.listarAdmin,
 );
+/* Seguimiento SIESA (sql/013): qué mandó el portal y qué cambió afuera. Solo
+   lectura: reintentar sigue en la bandeja. */
+rAdmin.get("/siesa/estado", seguimiento.estado);
+rAdmin.get("/siesa/envios", validar(esquemas.seguimientoEnvios, "query"), seguimiento.listarEnvios);
+rAdmin.get("/siesa/envios/:id", seguimiento.obtenerEnvio);
+rAdmin.get("/siesa/cambios", validar(esquemas.seguimientoCambios, "query"), seguimiento.listarCambios);
 router.use("/admin", rAdmin);
 
 /* ── CRON ─────────────────────────────────────────────────────────────────

@@ -12,6 +12,8 @@ import { consultarCotizaciones } from "../config/connekta.js";
 import { agruparCotizaciones } from "./normalizarCotizacion.js";
 import { sincronizarMaestro } from "./maestro.service.js";
 import { auditar } from "./auditoria.js";
+import { leerCotizacionesActuales, registrarCambios, destinoDe } from "./seguimientoSiesa.js";
+import { urlLectura } from "./verificarCotizacion.js";
 
 /** Supabase no traga un upsert de 60.000 filas de una. */
 const LOTE = 1000;
@@ -145,6 +147,16 @@ export async function sincronizar() {
 
   const filas = filasParaUpsert(cotizaciones, sincronizadoAt);
 
+  // Seguimiento (sql/013): la foto de lo que había, ANTES de pisarla con el
+  // upsert. Si no se puede leer, el snapshot sigue igual: comparar es un
+  // agregado, refrescar el catálogo es el trabajo.
+  let previas = null;
+  try {
+    previas = await leerCotizacionesActuales();
+  } catch (e) {
+    console.error(`[snapshot] sin diff de cambios esta corrida: ${e.message}`);
+  }
+
   for (const lote of enLotes(filas)) {
     const { error } = await supabase
       .from("pp_cotizaciones")
@@ -173,6 +185,17 @@ export async function sincronizar() {
   // consulta de terceros — ver maestro.service.js.
   const maestro = await sincronizarMaestro(cotizaciones);
 
+  // Las bajas solo cuentan si se barrió: si no, la corrida no es creíble.
+  const cambiosSiesa = previas
+    ? await registrarCambios({
+        existentes: previas,
+        nuevas: filas,
+        barrido: barrer,
+        detectadoAt: sincronizadoAt,
+        destinoLectura: destinoDe(urlLectura()),
+      })
+    : { registrados: 0, omitido: "no se pudo leer la tabla antes del upsert" };
+
   const resultado = {
     filasCrudas: crudas.length,
     cotizaciones: filas.length,
@@ -183,6 +206,7 @@ export async function sincronizar() {
     conOrdenDescuentoNoSoportado: conOrdenExtra.length,
     barrido: { ejecutado: barrer, motivo, borradas },
     maestro,
+    cambiosSiesa,
     duracionMs: Date.now() - inicio,
   };
 

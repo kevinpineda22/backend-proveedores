@@ -368,9 +368,14 @@ export async function importarCotizacion({ solicitudId, ...args }) {
  * @param {object}   args
  * @param {string|number} args.referencia   Para el log. No viaja a SIESA.
  * @param {object[]} args.cotizaciones      Los `{vigente, propuesta, ...}` de armarPayload.
- * @returns {Promise<{ok: true, sandbox?: true, payload: object, respuesta: object}>}
+ * @param {(payload: object, info: {sandbox: boolean}) => Promise<void>} [args.alArmar]
+ *        Se llama con el payload YA ARMADO y ANTES del POST. Existe para que el
+ *        seguimiento (sql/013) guarde lo que va a viajar antes de que viaje: si la
+ *        función muere esperando a SIESA, el registro ya tiene el payload.
+ *        Un fallo de este callback NO frena el envío.
+ * @returns {Promise<{ok: true, sandbox?: true, payload: object, respuesta: object, httpStatus?: number}>}
  */
-export async function importarLote({ referencia, cotizaciones = [] }) {
+export async function importarLote({ referencia, cotizaciones = [], alArmar }) {
   const faltan = configFaltante();
   if (faltan.length) throw new ConfigSiesaError(faltan);
 
@@ -399,6 +404,16 @@ export async function importarLote({ referencia, cotizaciones = [] }) {
   // SANDBOX — se corta JUSTO ANTES del POST y DESPUÉS de armar el payload: así el
   // armado, que es donde viven los bugs de formato, llave y re-emisión, se
   // ejercita igual contra datos reales y queda guardado para revisarlo.
+  // Fuera de cualquier try que pueda confundirse con un fallo del ERP: un error
+  // acá sin `enviadoASiesa` se leería como "sin respuesta".
+  if (alArmar) {
+    try {
+      await alArmar(payload, { sandbox: sandboxOn() });
+    } catch (e) {
+      console.error(`[siesa] alArmar falló para ${solicitudId ?? "?"}: ${e?.message}`);
+    }
+  }
+
   if (sandboxOn()) {
     // El payload ENTERO, no solo los conteos.
     //
@@ -442,7 +457,18 @@ export async function importarLote({ referencia, cotizaciones = [] }) {
     throw err;
   }
 
-  return { ok: true, payload, respuesta: data };
+  return { ok: true, payload, respuesta: data, httpStatus: status };
+}
+
+/** A dónde apunta el conector. Para el seguimiento y su pantalla; sin secretos. */
+export function infoConector() {
+  return {
+    url: cfg.url(),
+    idDocumento: cfg.idDocumento(),
+    nombreDocumento: cfg.nombreDocumento(),
+    sandbox: sandboxOn(),
+    faltantes: configFaltante(),
+  };
 }
 
 export { MONEDA, BLOQUES };

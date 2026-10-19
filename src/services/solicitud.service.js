@@ -24,7 +24,14 @@ import { createError, createErrorExpuesto } from "../middleware/errorHandler.js"
 import { costoNeto, evaluarPropuesta } from "./costoNeto.js";
 import { hoyEnColombia, porcentajesDescuento, separarVigentes } from "./normalizarCotizacion.js";
 import { registrarFirma, verificarFirmaDeSolicitud } from "./firma.service.js";
-import { importarLote } from "./siesaCotizacion.js";
+import { importarLote, infoConector } from "./siesaCotizacion.js";
+import {
+  abrirEnvio,
+  cerrarEnvio,
+  estadoDelLote,
+  origenDelFallo,
+  ESTADO_POR_ORIGEN,
+} from "./seguimientoSiesa.js";
 import { verificarEnSiesa, NO_CONFIRMA } from "./verificarCotizacion.js";
 import { revalidarTope } from "./revalidarTope.js";
 import { notificarResolucion } from "./notificacion.service.js";
@@ -604,10 +611,19 @@ async function empujarLote({ cuentaId, lote, cuentas, admin, ip }) {
   // rechazó" y habilita reintentar. Si un fallo de nuestra base cayera acá, le
   // diríamos al admin que reintente un precio que el ERP YA aceptó — o sea, que
   // lo duplique.
+  // Seguimiento (sql/013): el intento se abre con el payload ANTES del POST y se
+  // cierra con la respuesta. Nada de esto lanza: registrar no puede frenar el envío.
+  const inicio = Date.now();
+  const registro = { cuentaId, idTercero, sucursal, lote, admin, conector: infoConector() };
+  let envioId = null;
+
   let r;
   try {
     r = await importarLote({
       referencia: `líneas ${lote.map((l) => l.id).join(",")}`,
+      alArmar: async (payload, { sandbox }) => {
+        envioId = await abrirEnvio({ ...registro, payload, sandbox });
+      },
       cotizaciones: lote.map((l) => ({
         vigente: {
           claveItem: l.clave_item,
@@ -631,8 +647,30 @@ async function empujarLote({ cuentaId, lote, cuentas, admin, ip }) {
       })),
     });
   } catch (e) {
+    // Si falló antes de armar (configuración, validación) no hubo `alArmar`: el
+    // intento se abre igual, para que el panel muestre también lo que no salió.
+    if (envioId == null) envioId = await abrirEnvio({ ...registro, payload: e.payload ?? null });
+    await cerrarEnvio(
+      envioId,
+      {
+        estado: ESTADO_POR_ORIGEN[origenDelFallo(e)],
+        http_status: e.httpStatus ?? null,
+        respuesta: e.siesaData ?? null,
+        error: e.message,
+      },
+      inicio,
+    );
     return await marcarLoteFallido({ lote, admin, ip, e });
   }
+
+  // "aceptado" y no "aplicado": SIESA dijo OK, falta la relectura. Si la función
+  // muere en el medio, la fila queda diciendo exactamente eso.
+  await cerrarEnvio(
+    envioId,
+    { estado: r.sandbox ? "sandbox" : "aceptado", http_status: r.httpStatus ?? null, respuesta: r.respuesta },
+    inicio,
+  );
+  const verificacionesEnvio = [];
 
   /* SIESA respondiendo "exitosa" NO prueba que el precio haya quedado: la
      solicitud #5 lo demostró. Se relee y se compara, LÍNEA POR LÍNEA — un acuse
@@ -655,6 +693,11 @@ async function empujarLote({ cuentaId, lote, cuentas, admin, ip }) {
     // CONTRADICEN el éxito mandan la línea a revisión humana.
     const incierta = Boolean(verificacion && NO_CONFIRMA.has(verificacion.estado));
     const estadoFinal = incierta ? "incierto" : "aplicada";
+    verificacionesEnvio.push({
+      linea_id: l.id,
+      estado: verificacion?.estado ?? null,
+      motivo: verificacion?.motivo ?? null,
+    });
 
     const { error: errEstado } = await supabase
       .from("pp_solicitud_lineas")
@@ -727,6 +770,13 @@ async function empujarLote({ cuentaId, lote, cuentas, admin, ip }) {
     });
   }
 
+  if (!r.sandbox) {
+    await cerrarEnvio(envioId, {
+      estado: estadoDelLote(verificacionesEnvio),
+      verificaciones: verificacionesEnvio,
+    });
+  }
+
   /* El aviso al proveedor va ÚLTIMO y no puede romper nada: acá el precio ya se
      empujó al ERP. `notificarResolucion` no lanza, y un `incierto` no se avisa —no
      se le dice a un proveedor que su precio quedó aplicado sin haberlo comprobado.
@@ -772,12 +822,7 @@ async function marcarLoteFallido({ lote, admin, ip, e }) {
        true       → el ERP lo rechazó explícitamente. Nada quedó escrito.
        undefined  → se cortó la red o venció el timeout. NO SABEMOS si llegó.
      El tercero es el peligroso: es el único donde reintentar puede duplicar. */
-  const origen =
-    e.enviadoASiesa === false
-      ? "local"
-      : e.enviadoASiesa === true
-        ? "rechazo_erp"
-        : "sin_respuesta";
+  const origen = origenDelFallo(e);
 
   const cuantos = lote.length === 1 ? "El cambio" : `Los ${lote.length} cambios`;
   const mensaje =

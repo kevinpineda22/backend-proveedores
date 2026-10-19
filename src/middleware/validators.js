@@ -179,6 +179,33 @@ export const esquemas = {
     hasta: fechaISO.optional(),
   }),
 
+  /** GET /api/admin/siesa/envios — gemelo del CHECK de sql/013 */
+  seguimientoEnvios: z.object({
+    desde: fechaISO.optional(),
+    hasta: fechaISO.optional(),
+    estado: z
+      .enum([
+        "enviando",
+        "aceptado",
+        "aplicado",
+        "no_verificable",
+        "incierto",
+        "rechazado",
+        "sin_respuesta",
+        "no_enviado",
+        "sandbox",
+      ])
+      .optional(),
+  }),
+
+  /** GET /api/admin/siesa/cambios */
+  seguimientoCambios: z.object({
+    desde: fechaISO.optional(),
+    hasta: fechaISO.optional(),
+    origen: z.enum(["portal", "externo"]).optional(),
+    tipo: z.enum(["alta", "modificada", "baja"]).optional(),
+  }),
+
   /** GET /api/admin/diferencias-costo — el admin además puede filtrar un NIT */
   rangoDiferenciasAdmin: z.object({
     desde: fechaISO.optional(),
