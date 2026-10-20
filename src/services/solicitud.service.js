@@ -34,6 +34,7 @@ import {
 } from "./seguimientoSiesa.js";
 import { verificarEnSiesa, NO_CONFIRMA } from "./verificarCotizacion.js";
 import { revalidarTope } from "./revalidarTope.js";
+import { mensajeVencidas } from "./fechaActivacion.js";
 import { notificarResolucion } from "./notificacion.service.js";
 import { avisarSolicitudNueva } from "./compras.service.js";
 import { auditar } from "./auditoria.js";
@@ -468,6 +469,12 @@ export async function aprobarLineas({ lineaIds, admin, ip, confirmaDesactualizad
         `(${[...new Set(noPendientes.map((l) => l.estado))].join(", ")}). Actualice la bandeja.`,
     );
   }
+
+  /* ── 0. Fecha vencida: frenar ANTES del candado ─────────────────────────── */
+  // Si pasara al candado, `armarPayload` la rechazaría como retroactiva, quedaría
+  // `fallida`, y reintentar fallaría para siempre. Ver fechaActivacion.js.
+  const vencidas = mensajeVencidas(lineas);
+  if (vencidas) throw createError(409, vencidas.mensaje, { lineasVencidas: vencidas.ids });
 
   /* ── 1. La firma, del paquete completo ──────────────────────────────────── */
   const porSolicitud = new Map();

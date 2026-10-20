@@ -40,6 +40,40 @@ const aEnvio = ({ pp_cuentas: c, ...e }) => ({
   razon_social: c?.pp_proveedores?.razon_social ?? null,
 });
 
+/**
+ * Le pega a cada envío el estado ACTUAL de sus líneas.
+ *
+ * Un envío es una foto: si fue rechazado, queda rechazado para siempre. Pero la
+ * línea sigue su vida —se reintenta, se rechaza, se aplica—, y sin esto la
+ * pantalla seguiría contando como "pendiente" algo que compras ya resolvió. Un
+ * contador que nunca baja deja de mirarse.
+ *
+ * En tandas: `.in()` va en la URL y 500 envíos pueden traer bastantes ids.
+ * Si falla, los envíos salen sin `estado_lineas` y la pantalla no los da por
+ * resueltos: ante la duda, se muestran como pendientes.
+ */
+async function conEstadoDeLineas(envios) {
+  const ids = [...new Set(envios.flatMap((e) => e.linea_ids ?? []))];
+  const estados = new Map();
+  try {
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data, error } = await supabase
+        .from("pp_solicitud_lineas")
+        .select("id, estado")
+        .in("id", ids.slice(i, i + 300));
+      if (error) throw new Error(error.message);
+      for (const l of data ?? []) estados.set(l.id, l.estado);
+    }
+  } catch (e) {
+    console.error(`[seguimiento] sin estado actual de las líneas: ${e.message}`);
+    return envios;
+  }
+  return envios.map((e) => ({
+    ...e,
+    estado_lineas: (e.linea_ids ?? []).map((id) => ({ id, estado: estados.get(id) ?? null })),
+  }));
+}
+
 /** GET /admin/siesa/estado — a dónde escribe y lee el portal, y la última corrida. */
 export async function estado(req, res, next) {
   try {
@@ -94,7 +128,7 @@ export async function listarEnvios(req, res, next) {
 
     const { data, error } = await q;
     if (error) throw new Error(`No se pudieron leer los envíos: ${error.message}`);
-    const envios = (data ?? []).map(aEnvio);
+    const envios = await conEstadoDeLineas((data ?? []).map(aEnvio));
     res.json({ envios, limite: LIMITE_ENVIOS, truncado: envios.length === LIMITE_ENVIOS });
   } catch (e) {
     next(e);
@@ -119,7 +153,7 @@ export async function obtenerEnvio(req, res, next) {
     if (error) throw new Error(`No se pudo leer el envío: ${error.message}`);
     if (!data) throw createError(404, "No se encontró el envío.");
 
-    const envio = aEnvio(data);
+    const [envio] = await conEstadoDeLineas([aEnvio(data)]);
     const { data: eventos, error: errEv } = await supabase
       .from("pp_auditoria")
       .select("id, entidad_id, accion, estado_anterior, estado_nuevo, actor_rol, detalle, creado_at")
