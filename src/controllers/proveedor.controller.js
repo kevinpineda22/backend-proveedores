@@ -1,5 +1,12 @@
-import { catalogoDe, crearSolicitud, anular, marcarVistas } from "../services/solicitud.service.js";
+import {
+  catalogoDe,
+  crearSolicitud,
+  anular,
+  marcarVistas,
+  validarLineas,
+} from "../services/solicitud.service.js";
 import { supabase } from "../config/supabase.js";
+import { sincronizarProveedor } from "../services/snapshot.service.js";
 
 /** Quién soy. El frontend arma el encabezado con esto, sin pedir el maestro. */
 export function miCuenta(req, res) {
@@ -12,6 +19,33 @@ export function miCuenta(req, res) {
 export async function catalogo(req, res, next) {
   try {
     res.json({ items: await catalogoDe(req.cuenta) });
+  } catch (e) {
+    next(e);
+  }
+}
+
+/**
+ * Trae de SIESA lo del proveedor que está entrando. El portal lo dispara al
+ * abrir el panel y vuelve a pedir el catálogo cuando termina; mientras tanto
+ * muestra lo que ya había. Ver `sincronizarProveedor`.
+ */
+export async function actualizarCatalogo(req, res, next) {
+  try {
+    res.json(
+      await sincronizarProveedor(req.cuenta.nit, {
+        actorRol: "pp_proveedor",
+        actorUserId: req.usuario?.id,
+      }),
+    );
+  } catch (e) {
+    next(e);
+  }
+}
+
+/** Antes de firmar: qué líneas del carrito no pueden ir, y por qué. No escribe. */
+export async function validar(req, res, next) {
+  try {
+    res.json(await validarLineas({ cuenta: req.cuenta, lineas: req.body.lineas }));
   } catch (e) {
     next(e);
   }

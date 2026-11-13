@@ -8,6 +8,7 @@ import {
   firmaCoincide,
   validarTrazo,
   lineaParaFirma,
+  normalizarFirmante,
 } from "./firma.service.js";
 
 /** Una línea del paquete. */
@@ -308,4 +309,39 @@ test("los mensajes van en usted", () => {
     const m = validarTrazo(t);
     assert.equal(/\bvos\b|\bdibujá\b|\btenés\b/i.test(m), false, `voseo en "${m}"`);
   }
+});
+
+/* ── v3: quién firma (2026-11-13) ────────────────────────────────────────── */
+
+const FIRMANTE = { nombre: "Ana María Gómez", cedula: "1036123456" };
+const CON_FIRMANTE = { ...DATOS, firmante: FIRMANTE };
+
+test("v3: el nombre y la cédula entran en lo firmado", () => {
+  const texto = serializarParaFirma(CON_FIRMANTE);
+  assert.ok(texto.startsWith("v3\n"));
+  assert.match(texto, /firmante=ANA MARÍA GÓMEZ/);
+  assert.match(texto, /cedula=1036123456/);
+});
+
+test("v3: cambiar el nombre o la cédula rompe la firma", () => {
+  const hash = hashPayload(CON_FIRMANTE);
+  assert.equal(firmaCoincide(hash, CON_FIRMANTE), true);
+  assert.equal(firmaCoincide(hash, { ...DATOS, firmante: { ...FIRMANTE, nombre: "Otra Persona" } }), false);
+  assert.equal(firmaCoincide(hash, { ...DATOS, firmante: { ...FIRMANTE, cedula: "1036123457" } }), false);
+});
+
+test("v3: borrarle el firmante a la firma NO la convierte en una v2 válida", () => {
+  const hash = hashPayload(CON_FIRMANTE);
+  assert.equal(firmaCoincide(hash, DATOS), false);
+});
+
+test("v3: espacios, mayúsculas y puntos de la cédula no cambian la firma", () => {
+  const hash = hashPayload(CON_FIRMANTE);
+  const igual = { ...DATOS, firmante: { nombre: "  ana  maría gómez ", cedula: "1.036.123.456" } };
+  assert.equal(firmaCoincide(hash, igual), true);
+  assert.deepEqual(normalizarFirmante({ nombre: " ana  gómez", cedula: "1.036" }), { nombre: "ANA GÓMEZ", cedula: "1036" });
+});
+
+test("las firmas v2 que ya existían (sin firmante) siguen validando", () => {
+  assert.equal(firmaCoincide(hashPayload(DATOS), DATOS), true);
 });

@@ -110,6 +110,25 @@ test("RE-EMITE los impuestos vigentes con la FECHA NUEVA", () => {
   assert.equal(impuestos[1].LLAVE_IMPUESTO, "IBUA");
 });
 
+test("un impuesto en valor 0 NO viaja: el conector lo rechaza y tumba el lote", () => {
+  // SIESA, 2026-11-13: "Cotizaciones - Impuestos: valor_imp no es mayor que cero".
+  const vigente = vigenteDe([
+    { ...ATUN_ALAMAR, IdLlaveImpto: "ICO ", ValorImpto: 0 },
+    { ...ATUN_ALAMAR, IdLlaveImpto: "IBU3", ValorImpto: 800 },
+  ]);
+  const impuestos = armar({ vigente })[BLOQUES.impuestos];
+  assert.equal(impuestos.length, 1);
+  assert.equal(impuestos[0].LLAVE_IMPUESTO, "IBU3");
+});
+
+test("con el único impuesto en 0, el bloque de impuestos se omite entero", () => {
+  const vigente = vigenteDe([{ ...ATUN_ALAMAR, IdLlaveImpto: "ICO ", ValorImpto: 0 }]);
+  assert.equal(BLOQUES.impuestos in armar({ vigente }), false);
+  // Lo mismo si el 0 viene de la propuesta del proveedor.
+  const p = armar({ propuesta: { ...PROPUESTA, impuestos: [{ llave: "ICO", valor: 0 }] } });
+  assert.equal(BLOQUES.impuestos in p, false);
+});
+
 test("sin impuestos vigentes, el bloque NO viaja", () => {
   const p = armar();
   assert.equal(BLOQUES.impuestos in p, false);
@@ -480,17 +499,17 @@ test("un impuesto con otro valor se manda con el valor propuesto", () => {
   assert.match(p["Impuestos en Valor"][0].VALOR_IMPUESTO, /5000\.0000$/);
 });
 
-test("un impuesto en 0 SÍ se emite: decir que el ítem está sujeto es información", () => {
-  // No es lo mismo "no paga ICO" que "no está sujeto a ICO". El primero es una
-  // fila con valor 0; el segundo es la ausencia de la fila.
+test("un impuesto propuesto en 0 NO se emite: el conector no admite 'sujeto en 0'", () => {
+  // Hasta el 2026-11-13 se emitía, para distinguir "paga 0" de "no está sujeto".
+  // SIESA producción lo rechazó —"valor_imp no es mayor que cero"— y con él el
+  // lote entero. La distinción no se puede escribir por este conector.
   const p = armarPayload({
     vigente: vigenteConIco(),
     propuesta: { ...base, impuestos: [{ llave: "ICO", valor: 0 }] },
     hoy: "2026-09-06",
   });
 
-  assert.equal(p["Impuestos en Valor"].length, 1);
-  assert.match(p["Impuestos en Valor"][0].VALOR_IMPUESTO, /0\.0000$/);
+  assert.equal("Impuestos en Valor" in p, false);
 });
 
 test("los impuestos propuestos llevan FECHA_ACTIVACIÓN con tilde", () => {

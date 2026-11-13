@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { debeBarrer, filasParaUpsert, enLotes } from "./snapshot.service.js";
+import {
+  debeBarrer,
+  filasParaUpsert,
+  enLotes,
+  refrescoVigente,
+  debeBarrerProveedor,
+} from "./snapshot.service.js";
 import { agruparCotizaciones } from "./normalizarCotizacion.js";
 
 /* ── debeBarrer: la válvula de seguridad ─────────────────────────────────── */
@@ -75,6 +81,8 @@ test("mapea una cotización normalizada a columnas de pp_cotizaciones", () => {
     precio: 4672,
     impuestos: [{ llave: "ICO", valor: 1200 }],
     descuentos: [{ orden: 1, porcentaje: 3 }],
+    // Sin columna EstadoItem en la fila cruda: no se sabe, y NO bloquea.
+    item_activo: null,
     sincronizado_at: "2026-08-26T10:00:00.000Z",
   });
 });
@@ -119,4 +127,37 @@ test("un arreglo vacío no genera lotes vacíos", () => {
 
 test("menos filas que el tamaño de lote da un solo lote", () => {
   assert.equal(enLotes([1, 2, 3], 1000).length, 1);
+});
+
+/* ── Refresco de UN proveedor (2026-11-13) ───────────────────────────────── */
+
+test("refrescoVigente: dentro de la ventana no se vuelve a leer SIESA", () => {
+  const ahora = Date.parse("2026-11-13T15:00:00Z");
+  assert.equal(refrescoVigente("2026-11-13T14:55:00Z", ahora, 10 * 60_000), true);
+  assert.equal(refrescoVigente("2026-11-13T14:49:59Z", ahora, 10 * 60_000), false);
+});
+
+test("refrescoVigente: sin sincronización previa, o con una ilegible, se lee", () => {
+  assert.equal(refrescoVigente(null), false);
+  assert.equal(refrescoVigente(""), false);
+  assert.equal(refrescoVigente("no es fecha"), false);
+});
+
+test("debeBarrerProveedor: barre cuando la lectura completa es creíble", () => {
+  assert.deepEqual(
+    debeBarrerProveedor({ propias: 380, previasProveedor: 400, total: 19000, existentesTotal: 19100 }),
+    { barrer: true, motivo: null },
+  );
+});
+
+test("debeBarrerProveedor: NO deja a un proveedor en cero por una lectura sin sus filas", () => {
+  const r = debeBarrerProveedor({ propias: 0, previasProveedor: 400, total: 19000, existentesTotal: 19100 });
+  assert.equal(r.barrer, false);
+  assert.match(r.motivo, /ninguna fila de este proveedor/);
+});
+
+test("debeBarrerProveedor: hereda la guarda global si la lectura encogió", () => {
+  const r = debeBarrerProveedor({ propias: 380, previasProveedor: 400, total: 5000, existentesTotal: 19000 });
+  assert.equal(r.barrer, false);
+  assert.match(r.motivo, /encogió/);
 });

@@ -170,8 +170,52 @@ export function normalizarFila(cruda) {
       // Vacío en el 100 % de los casos de hoy. Si algún día trae algo, es un
       // descuento que estamos tirando y que hace mal la cuenta del tope.
       ordenesDesconocidos: ordenesDesconocidos(cruda),
+      activo: estadoItem(cruda?.EstadoItem),
     },
   };
+}
+
+/**
+ * ¿El ítem está activo en SIESA? `true`, `false` o `null` (no se sabe).
+ *
+ * Compras, 2026-11-13: un proveedor cargó productos INACTIVOS en SIESA y el
+ * portal los trató como normales — la consulta no traía el estado. Ahora trae la
+ * columna `EstadoItem` (ver scripts/consultas/merkahorro_cotizaciones_dev_2.sql):
+ * 1 = activo; cualquier otro valor numérico, no.
+ *
+ * `null` cuando la columna no viene o no se entiende: ante la duda, NO bloquear.
+ * Un producto activo que el portal se niega a cotizar frena una negociación por
+ * un dato que no tenemos. Ver también `estadoCreible()`.
+ */
+export function estadoItem(valor) {
+  if (valor == null || valor === "") return null;
+  const n = Number(String(valor).trim());
+  if (!Number.isFinite(n)) return null;
+  return n === 1;
+}
+
+/**
+ * Si "inactivo" sale en la MAYORÍA del catálogo, el dato está mal leído, no el
+ * catálogo: se descarta el estado de todas (queda `null`) y se avisa.
+ *
+ * Es la guarda contra el error caro: si la columna de SIESA significara al revés
+ * de lo que creemos, sin esto el portal bloquearía cotizar casi todo de un día
+ * para el otro. Mismo criterio que `debeBarrer` con el catálogo que encoge.
+ *
+ * @returns {{cotizaciones: object[], descartado: string|null}}
+ */
+export function estadoCreible(cotizaciones = [], maximaFraccion = 0.5) {
+  const conDato = cotizaciones.filter((c) => c.activo != null);
+  const inactivas = conDato.filter((c) => c.activo === false).length;
+  if (conDato.length && inactivas > conDato.length * maximaFraccion) {
+    return {
+      cotizaciones: cotizaciones.map((c) => ({ ...c, activo: null })),
+      descartado:
+        `${inactivas} de ${conDato.length} cotizaciones vienen con el ítem INACTIVO. ` +
+        `Se ignora el estado: casi seguro la columna EstadoItem no significa lo que creemos.`,
+    };
+  }
+  return { cotizaciones, descartado: null };
 }
 
 /**

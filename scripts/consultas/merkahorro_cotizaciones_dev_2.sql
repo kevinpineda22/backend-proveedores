@@ -16,7 +16,8 @@ SELECT
     Dscto1.f214_porcentaje_dscto        AS PorcDsctoOrden1,
     Dscto2.f214_porcentaje_dscto        AS PorcDsctoOrden2,
     Dscto3.f214_porcentaje_dscto        AS PorcDsctoOrden3,
-    Dscto4.f214_porcentaje_dscto        AS PorcDsctoOrden4
+    Dscto4.f214_porcentaje_dscto        AS PorcDsctoOrden4,
+    t121.f121_ind_estado                AS EstadoItem
 
 FROM (
         SELECT
@@ -49,6 +50,9 @@ INNER JOIN dbo.t200_mm_terceros AS t200
 INNER JOIN dbo.v121
         ON cot.f212_rowid_item_ext = v121.v121_rowid_item_ext
        AND t200.f200_id_cia        = v121.v121_id_cia
+
+LEFT OUTER JOIN dbo.t121_mc_items_extensiones AS t121
+        ON cot.f212_rowid_item_ext = t121.f121_rowid
 
 INNER JOIN dbo.t202_mm_proveedores AS t202
         ON cot.f212_id_sucursal = t202.f202_id_sucursal

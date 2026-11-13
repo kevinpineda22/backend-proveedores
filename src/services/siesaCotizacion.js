@@ -173,8 +173,18 @@ export function armarPayload({ vigente, propuesta, permitirRetroactiva = false, 
 
      El tope de % NO mira esto. Un impuesto lo fija la ley, no la negociación: el
      control es que lo revise una persona de compras, no un umbral. Ver el
-     comentario de pp_solicitud_lineas.variacion_pct en la migración 006. */
-  const impuestos = (propuesta.impuestos ?? vigente.impuestos ?? []).map((imp) => ({
+     comentario de pp_solicitud_lineas.variacion_pct en la migración 006.
+
+     SOLO SE EMITEN LOS MAYORES A 0 (2026-11-13). SIESA guarda impuestos en valor
+     0 —el snapshot los conserva, porque "sujeto a ICO en 0" es información—,
+     pero su propio conector los RECHAZA: *"Cotizaciones - Impuestos: valor_imp
+     no es mayor que cero"*. Y como varias líneas viajan en UN plano (ver
+     `fusionarPayloads`), una sola fila en 0 tumbaba el lote entero sin escribir
+     nada. Omitirla no cambia plata: un impuesto de $0 y ningún impuesto cobran lo
+     mismo. */
+  const impuestos = (propuesta.impuestos ?? vigente.impuestos ?? [])
+    .filter((imp) => Number(imp?.valor) > 0)
+    .map((imp) => ({
     ...llave(identidad, "FECHA_ACTIVACIÓN"),
     LLAVE_IMPUESTO: campo.llaveImpuesto(imp.llave),
     VALOR_IMPUESTO: campo.valorImpuesto(imp.valor),

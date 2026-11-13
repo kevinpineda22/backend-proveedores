@@ -9,7 +9,7 @@
 
 import { supabase } from "../config/supabase.js";
 import { consultarCotizaciones } from "../config/connekta.js";
-import { agruparCotizaciones } from "./normalizarCotizacion.js";
+import { agruparCotizaciones, estadoCreible } from "./normalizarCotizacion.js";
 import { sincronizarMaestro } from "./maestro.service.js";
 import { auditar } from "./auditoria.js";
 import { leerCotizacionesActuales, registrarCambios, destinoDe } from "./seguimientoSiesa.js";
@@ -78,6 +78,8 @@ export function filasParaUpsert(cotizaciones, sincronizadoAt) {
     precio: c.precio,
     impuestos: c.impuestos,
     descuentos: c.descuentos,
+    // null = no se sabe (la consulta no trajo el estado): NO bloquea. Ver estadoItem.
+    item_activo: c.activo ?? null,
     sincronizado_at: sincronizadoAt,
   }));
 }
@@ -103,7 +105,10 @@ export async function sincronizar() {
   const sincronizadoAt = new Date().toISOString();
 
   const crudas = await consultarCotizaciones();
-  const { cotizaciones, descartadas } = agruparCotizaciones(crudas);
+  const agrupadas = agruparCotizaciones(crudas);
+  const { descartadas } = agrupadas;
+  const { cotizaciones, descartado: estadoDescartado } = estadoCreible(agrupadas.cotizaciones);
+  if (estadoDescartado) console.error(`[snapshot] 🔴 ${estadoDescartado}`);
 
   // Los descartes se reportan SIEMPRE, aunque el snapshot salga bien. Una fila que
   // SIESA manda y nosotros no podemos leer es un producto que el proveedor no ve
@@ -213,6 +218,204 @@ export async function sincronizar() {
   await registrar(resultado);
   return resultado;
 }
+
+/* =============================================================================
+   Refresco de UN proveedor — al ingresar al portal, o cuando el admin abre su
+   perfil (pedido de compras, 2026-11-13: "si mueven algo en SIESA, no podemos
+   esperar hasta mañana para verlo").
+
+   LA RESTRICCIÓN QUE MANDA EL DISEÑO: las consultas personalizadas de Connekta
+   NO aceptan parámetros. Verificado contra producción el 2026-11-13:
+   `parametros=IdTercero=…` → HTTP 400 "el query a ejecutar no maneja
+   parametros". No hay forma de pedirle a SIESA "solo Quala".
+
+   Entonces: se LEE el catálogo entero (~20 páginas, ~20 s) y se ESCRIBE solo lo
+   del proveedor. Lo caro es la lectura, así que se protege por dos lados:
+
+     · `REFRESCO_PROVEEDOR_MIN` (10 min por defecto): si las filas de ese NIT se
+       sincronizaron hace menos, no se vuelve a leer. Vive en la BASE, no en
+       memoria, para que valga entre instancias de Vercel.
+     · Una lectura en curso se COMPARTE dentro de la instancia, y su resultado se
+       reutiliza `LECTURA_CACHE_SEG`: diez proveedores que entran juntos son una
+       lectura al ERP, no diez.
+
+   El cron diario sigue siendo el que barre el catálogo COMPLETO y arma el
+   maestro. Esto solo adelanta lo de un proveedor.
+   ============================================================================= */
+
+const VIGENCIA_PROVEEDOR_MS =
+  (Number(process.env.REFRESCO_PROVEEDOR_MIN) || 10) * 60_000;
+const LECTURA_CACHE_MS = (Number(process.env.LECTURA_CACHE_SEG) || 90) * 1000;
+
+/** @type {{promesa: Promise<{filasCrudas:number, cotizaciones:object[]}>, at:number}|null} */
+let lecturaCompartida = null;
+
+/** La lectura completa de SIESA, compartida entre pedidos de la misma instancia. */
+function leerCatalogoSiesa() {
+  if (lecturaCompartida && Date.now() - lecturaCompartida.at < LECTURA_CACHE_MS) {
+    return lecturaCompartida.promesa;
+  }
+  const promesa = consultarCotizaciones().then((crudas) => {
+    const { cotizaciones, descartado } = estadoCreible(agruparCotizaciones(crudas).cotizaciones);
+    if (descartado) console.error(`[refresco] 🔴 ${descartado}`);
+    return { filasCrudas: crudas.length, cotizaciones };
+  });
+  lecturaCompartida = { promesa, at: Date.now() };
+  // Un fallo no se cachea: el próximo pedido vuelve a intentar.
+  promesa.catch(() => {
+    if (lecturaCompartida?.promesa === promesa) lecturaCompartida = null;
+  });
+  return promesa;
+}
+
+/** Solo para los tests: olvidar la lectura compartida. */
+export function _olvidarLectura() {
+  lecturaCompartida = null;
+}
+
+/**
+ * ¿Hace falta volver a leer SIESA para este proveedor?
+ * Función pura: el umbral se prueba sin base.
+ */
+export function refrescoVigente(ultimaSincronizacion, ahora = Date.now(), vigenciaMs = VIGENCIA_PROVEEDOR_MS) {
+  if (!ultimaSincronizacion) return false;
+  const t = new Date(ultimaSincronizacion).getTime();
+  return Number.isFinite(t) && ahora - t < vigenciaMs;
+}
+
+/**
+ * ¿Se pueden borrar las filas del proveedor que esta lectura no trajo?
+ *
+ * Mismo criterio que `debeBarrer`, con una guarda más: si el proveedor tenía
+ * filas y la lectura no trajo NINGUNA, no se borra. Puede ser real (le sacaron
+ * todo el catálogo), pero también un recorrido incompleto — y dejar a un
+ * proveedor con la tabla vacía es el error grave. El cron de la noche, que mira
+ * el catálogo entero, decide.
+ */
+export function debeBarrerProveedor({ propias, previasProveedor, total, existentesTotal }) {
+  const global = debeBarrer(total, existentesTotal);
+  if (!global.barrer) return global;
+  if (propias === 0 && previasProveedor > 0) {
+    return { barrer: false, motivo: "la lectura no trajo ninguna fila de este proveedor" };
+  }
+  return { barrer: true, motivo: null };
+}
+
+/** Las filas actuales de un NIT, paginadas (Supabase corta en 1.000). */
+async function leerDeNit(nit) {
+  const filas = [];
+  for (let desde = 0; ; desde += LOTE) {
+    const { data, error } = await supabase
+      .from("pp_cotizaciones")
+      .select(
+        "id, clave, clave_item, id_tercero, nit, sucursal, item, descripcion_item, " +
+          "unidad_medida, fecha_activacion, precio, impuestos, descuentos, sincronizado_at",
+      )
+      .eq("nit", nit)
+      .order("id")
+      .range(desde, desde + LOTE - 1);
+    if (error) throw new Error(`no se pudo leer pp_cotizaciones del NIT ${nit}: ${error.message}`);
+    filas.push(...(data ?? []));
+    if (!data || data.length < LOTE) break;
+  }
+  return filas;
+}
+
+/**
+ * Refresca las cotizaciones de UN proveedor (todas sus sucursales) desde SIESA.
+ *
+ * @param {string} nit
+ * @param {object} [opciones]
+ * @param {boolean} [opciones.forzar]  Saltar la ventana de `REFRESCO_PROVEEDOR_MIN`.
+ * @param {string} [opciones.actorRol] Para la auditoría: `pp_proveedor` o `pp_admin`.
+ * @param {string} [opciones.actorUserId]
+ * @returns {Promise<{actualizado: boolean, motivo: string|null, sincronizadoAt: string|null,
+ *                    cotizaciones?: number, borradas?: number, duracionMs?: number}>}
+ */
+export async function sincronizarProveedor(nit, { forzar = false, actorRol, actorUserId } = {}) {
+  const inicio = Date.now();
+  const n = String(nit ?? "").trim();
+  if (!n) throw new Error("sincronizarProveedor: falta el NIT");
+
+  const previas = await leerDeNit(n);
+  const ultima = corridaMasNueva(previas);
+
+  if (!forzar && refrescoVigente(ultima)) {
+    return { actualizado: false, motivo: "reciente", sincronizadoAt: ultima };
+  }
+
+  const sincronizadoAt = new Date().toISOString();
+  const { cotizaciones } = await leerCatalogoSiesa();
+  const filas = filasParaUpsert(
+    cotizaciones.filter((c) => String(c.nit).trim() === n),
+    sincronizadoAt,
+  );
+
+  for (const lote of enLotes(filas)) {
+    const { error } = await supabase.from("pp_cotizaciones").upsert(lote, { onConflict: "clave" });
+    if (error) throw new Error(`Refresco ${n}: falló el upsert — ${error.message}`);
+  }
+
+  const { count: existentesTotal } = await supabase
+    .from("pp_cotizaciones")
+    .select("id", { count: "exact", head: true });
+
+  const { barrer, motivo } = debeBarrerProveedor({
+    propias: filas.length,
+    previasProveedor: previas.length,
+    total: cotizaciones.length,
+    existentesTotal: existentesTotal ?? 0,
+  });
+
+  let borradas = 0;
+  if (barrer) {
+    const { count, error } = await supabase
+      .from("pp_cotizaciones")
+      .delete({ count: "exact" })
+      .eq("nit", n)
+      .lt("sincronizado_at", sincronizadoAt);
+    if (error) throw new Error(`Refresco ${n}: falló el barrido — ${error.message}`);
+    borradas = count ?? 0;
+  } else if (motivo) {
+    console.warn(`[refresco ${n}] barrido OMITIDO: ${motivo}`);
+  }
+
+  /* El seguimiento de cambios (sql/013) se registra ACÁ también. Si no, un
+     cambio que este refresco ya trajo no aparecería nunca: a la noche, el cron
+     compararía contra filas que ya están al día y no vería diferencia. */
+  const cambiosSiesa = await registrarCambios({
+    existentes: previas,
+    nuevas: filas,
+    barrido: barrer,
+    detectadoAt: sincronizadoAt,
+    destinoLectura: destinoDe(urlLectura()),
+  });
+
+  const resultado = {
+    actualizado: true,
+    motivo: null,
+    sincronizadoAt,
+    cotizaciones: filas.length,
+    borradas,
+    duracionMs: Date.now() - inicio,
+  };
+
+  await auditar({
+    entidad: "pp_cotizaciones",
+    entidadId: n,
+    accion: "refresco_proveedor",
+    actorRol,
+    actorUserId,
+    detalle: { ...resultado, barrido: { ejecutado: barrer, motivo }, cambiosSiesa },
+  });
+
+  return resultado;
+}
+
+/** La marca de sincronización más nueva de un conjunto de filas. */
+const corridaMasNueva = (filas) =>
+  filas.reduce((max, f) => (f.sincronizado_at && f.sincronizado_at > max ? f.sincronizado_at : max), "") ||
+  null;
 
 /** Deja constancia de la corrida. Nunca lanza: el snapshot ya salió bien. */
 async function registrar(resultado) {

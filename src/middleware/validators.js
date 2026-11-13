@@ -82,11 +82,12 @@ export const esquemas = {
         }),
       )
       .min(1, "La solicitud no tiene ningún producto")
-      /* El tope es del plano que se le manda a SIESA, no de la pantalla. Un
-         paquete gigante es un POST gigante y un rechazo del ERP que no dice cuál
-         de las 400 líneas está mal. Que el corte lo ponga el portal, con un
-         mensaje que se entiende. */
-      .max(100, "No se pueden enviar más de 100 productos en una misma solicitud")
+      /* Era 100 y se subió a 500 (compras, 2026-11-13): un proveedor con 400
+         productos tenía que firmar cuatro veces el mismo descuento. El problema
+         original —un plano gigante que SIESA rechaza entero— se resolvió del
+         otro lado: al aprobar, se empuja en tandas de 100 (`LINEAS_POR_PLANO`).
+         Gemelo de `TOPE_LINEAS` en ProveedorPanel.jsx. */
+      .max(500, "No se pueden enviar más de 500 productos en una misma solicitud")
       /* Dos veces el mismo renglón chocaría contra `idx_pp_lineas_pendiente_unica`
          con un 23505 que se lee como "ya tiene una solicitud pendiente" — un
          mensaje sobre otra solicitud, cuando el problema está en ésta. */
@@ -95,6 +96,34 @@ export const esquemas = {
         "Hay un producto repetido en la solicitud. Cada renglón puede ir una sola vez.",
       ),
     firma: z.string().min(1, "Falta la firma"),
+    /* Quién firma (compras, 2026-11-13): el trazo solo no identifica a nadie.
+       La cédula se valida por DÍGITOS: "1.036.123.456" es la misma que
+       "1036123456", y el portal no tiene por qué rechazar los puntos. */
+    firmante: z.object({
+      nombre: z
+        .string()
+        .trim()
+        .min(5, "Escriba su nombre completo")
+        .max(120, "El nombre es demasiado largo"),
+      cedula: z
+        .string()
+        .trim()
+        .refine((c) => /^\d{5,12}$/.test(c.replace(/\D/g, "")), "Escriba un número de cédula válido (solo números)"),
+    }, { required_error: "Escriba su nombre y su cédula para firmar" }),
+  }),
+
+  /** POST /api/proveedor/solicitudes/validar — revisar el carrito antes de firmar */
+  validarCarrito: z.object({
+    lineas: z
+      .array(
+        z.object({
+          claveItem: z.string().min(1),
+          // Opcional: al revisar, el proveedor todavía puede no haber elegido fecha.
+          fechaActivacion: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
+        }),
+      )
+      .min(1)
+      .max(500),
   }),
 
   /** POST /api/proveedor/solicitudes/lineas/vistas — apagar avisos del inicio */
@@ -110,16 +139,18 @@ export const esquemas = {
 
   /** POST /api/admin/solicitudes/lineas/aprobar — una, varias o todas */
   resolverLineas: z.object({
+    // "Todas" de una solicitud: tiene que caber el tope de `crearSolicitud`.
     lineaIds: z
       .array(z.number().int().positive())
       .min(1, "No se seleccionó ninguna línea")
-      .max(100),
+      .max(500),
     confirmaDesactualizado: z.boolean().optional().default(false),
   }),
 
   /** POST /api/admin/solicitudes/lineas/rechazar */
   rechazarLineas: z.object({
-    lineaIds: z.array(z.number().int().positive()).min(1, "No se seleccionó ninguna línea").max(100),
+    // Mismo tope que aprobar: rechazar una solicitud entera tiene que caber.
+    lineaIds: z.array(z.number().int().positive()).min(1, "No se seleccionó ninguna línea").max(500),
     motivo: z
       .string()
       .trim()

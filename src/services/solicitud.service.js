@@ -46,9 +46,12 @@ import {
 } from "./grupos.service.js";
 
 const SELECT_COTIZACION =
-  "clave, clave_item, id_tercero, nit, sucursal, moneda, item, descripcion_item, unidad_medida, fecha_activacion, precio, impuestos, descuentos";
+  "clave, clave_item, id_tercero, nit, sucursal, moneda, item, descripcion_item, unidad_medida, fecha_activacion, precio, impuestos, descuentos, item_activo";
 
 const SELECT_LINEA = "*";
+
+/** Líneas por plano enviado a SIESA. El tope que existía antes de 2026-11-13. */
+const LINEAS_POR_PLANO = 100;
 
 /** Fila de `pp_cotizaciones` → el objeto que consumen costoNeto y siesaCotizacion. */
 const aCotizacion = (f) => ({
@@ -65,6 +68,8 @@ const aCotizacion = (f) => ({
   precio: Number(f.precio),
   impuestos: f.impuestos ?? [],
   descuentos: f.descuentos ?? [],
+  // true / false / null (no se sabe). Solo `false` bloquea. Ver estadoItem().
+  activo: f.item_activo ?? null,
 });
 
 /**
@@ -92,6 +97,148 @@ export async function vigenteDe(cuenta, claveItem) {
   return vigentes[0] ?? null;
 }
 
+/**
+ * Las vigentes de MUCHOS renglones de una cuenta, en una lectura.
+ *
+ * `vigenteDe` hace una consulta por renglón, en serie. Con el tope de 100 líneas
+ * eran 100 idas a la base; con el tope nuevo (500, compras 2026-11-13) eran 500,
+ * y una solicitud grande rozaba el límite de tiempo de Vercel solo en leer
+ * precios. Acá se lee el catálogo de la cuenta UNA vez (paginado: Supabase corta
+ * en 1.000) y se resuelve en memoria con la MISMA regla que `vigenteDe`.
+ *
+ * Mismo aislamiento: filtra por el NIT y la sucursal DE LA CUENTA. Un `claveItem`
+ * de otro proveedor no aparece en el mapa y la línea muere igual que antes.
+ *
+ * @returns {Promise<Map<string, object>>} claveItem → cotización vigente
+ */
+export async function vigentesDe(cuenta, clavesItem = []) {
+  const buscadas = new Set(clavesItem);
+  const filas = [];
+  const PAGINA = 1000;
+  for (let desde = 0; ; desde += PAGINA) {
+    const { data, error } = await supabase
+      .from("pp_cotizaciones")
+      .select(SELECT_COTIZACION)
+      .eq("nit", cuenta.nit)
+      .eq("sucursal", cuenta.sucursal)
+      .order("clave")
+      .range(desde, desde + PAGINA - 1);
+    if (error) throw new Error(`No se pudo leer la cotización: ${error.message}`);
+    filas.push(...(data ?? []).filter((f) => buscadas.has(f.clave_item)));
+    if (!data || data.length < PAGINA) break;
+  }
+  const { vigentes } = separarVigentes(filas.map(aCotizacion));
+  return new Map(vigentes.map((v) => [v.claveItem, v]));
+}
+
+/**
+ * ¿Por qué esta línea NO se puede cotizar? `null` si se puede.
+ *
+ * Función pura: es la regla, y la usan los dos caminos —`crearSolicitud`, que
+ * frena todo el paquete, y `validarLineas`, que antes de firmar separa las malas
+ * para que el proveedor envíe el resto—. Dos copias de estas reglas terminarían
+ * diciendo cosas distintas.
+ *
+ * Los mensajes nombran el PRODUCTO: con un paquete de cuarenta, "el producto no
+ * está disponible" obliga a adivinar cuál, y el proveedor termina borrando de a
+ * uno hasta que pasa.
+ *
+ * @returns {{status: number, motivo: string, mensaje: string}|null}
+ *   `motivo` es corto, para la lista del aviso; `mensaje`, la frase completa.
+ */
+export function problemaDeLinea({ vigente, linea, hoy }) {
+  if (!vigente) {
+    return {
+      status: 404,
+      motivo: "Ya no está en su catálogo de SIESA.",
+      mensaje: `Uno de los productos no está disponible para cotizar en su catálogo (${linea.claveItem}).`,
+    };
+  }
+  /* Compras, 2026-11-13: un ítem INACTIVO en SIESA se cotizaba como cualquier
+     otro, porque la consulta no traía el estado. Solo `false` bloquea: `null` es
+     "no se sabe" y ante la duda no se frena una negociación. */
+  if (vigente.activo === false) {
+    return {
+      status: 409,
+      motivo: "Está inactivo en SIESA.",
+      mensaje:
+        `"${vigente.descripcionItem}" está inactivo en SIESA y no se puede cotizar. ` +
+        `Quítelo de la solicitud o comuníquese con Merkahorro.`,
+    };
+  }
+  if (!(vigente.precio > 0)) {
+    return {
+      status: 409,
+      motivo: "No tiene un precio vigente en SIESA.",
+      mensaje:
+        `"${vigente.descripcionItem}" no tiene un precio vigente en el sistema. ` +
+        `Quítelo de la solicitud o comuníquese con Merkahorro.`,
+    };
+  }
+  /* FUTURA, no "de hoy en adelante".
+     María José (compras), 2026-09-07: *"la fecha sí o sí debe ser una fecha
+     futura, no tiene sentido permitir que la fecha sea pasada"*.
+
+     Hoy tampoco entra: un pedido puesto esta mañana al precio viejo y recibido
+     esta tarde entraría al nuevo. Es la fecha retroactiva otra vez, en chiquito.
+
+     La pantalla ya lo impide, pero la regla vive ACÁ: el portal no es el único
+     que puede llamar a esta API. */
+  if (linea.fechaActivacion && linea.fechaActivacion <= hoy) {
+    return {
+      status: 422,
+      motivo: "La fecha desde la que rige tiene que ser futura.",
+      mensaje:
+        `El precio de "${vigente.descripcionItem}" tiene que regir desde una fecha futura, ` +
+        `no desde hoy ni antes.`,
+    };
+  }
+  return null;
+}
+
+/**
+ * Revisa un carrito ANTES de firmar y dice qué líneas no pueden ir, y por qué.
+ *
+ * Compras, 2026-11-13: *"el sistema debe subir todo lo que sí está correcto,
+ * eliminar únicamente esas líneas malas y avisar que no se subieron y su
+ * motivo"*. No se puede hacer DESPUÉS de firmar: el proveedor firmó cuarenta
+ * productos, y si el servidor guardara treinta y ocho la firma dejaría de cubrir
+ * lo que se envió. Por eso el portal llama a esto primero, saca las malas del
+ * carrito con el aviso, y recién ahí se firma.
+ *
+ * No escribe nada.
+ *
+ * @param {{cuenta: object, lineas: Array<{claveItem: string, fechaActivacion?: string}>}} p
+ * @returns {Promise<{rechazadas: Array<{claveItem: string, descripcion: string|null, motivo: string}>}>}
+ */
+export async function validarLineas({ cuenta, lineas = [] }) {
+  const hoy = hoyEnColombia();
+  const vigentes = await vigentesDe(cuenta, lineas.map((l) => l.claveItem));
+
+  /* Ya tiene una propuesta esperando: chocaría contra
+     `idx_pp_lineas_pendiente_unica` al crear, y tumbaría el paquete entero. */
+  const { data: pendientes, error } = await supabase
+    .from("pp_solicitud_lineas")
+    .select("clave_item")
+    .eq("cuenta_destino_id", cuenta.id)
+    .eq("estado", "pendiente");
+  if (error) throw new Error(`No se pudieron leer las solicitudes pendientes: ${error.message}`);
+  const conPendiente = new Set((pendientes ?? []).map((p) => p.clave_item));
+
+  const rechazadas = [];
+  for (const l of lineas) {
+    const vigente = vigentes.get(l.claveItem) ?? null;
+    const problema = problemaDeLinea({ vigente, linea: l, hoy });
+    const motivo =
+      problema?.motivo ??
+      (conPendiente.has(l.claveItem) ? "Ya tiene una solicitud esperando revisión." : null);
+    if (motivo) {
+      rechazadas.push({ claveItem: l.claveItem, descripcion: vigente?.descripcionItem ?? null, motivo });
+    }
+  }
+  return { rechazadas };
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    CREAR
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -108,43 +255,17 @@ export async function crearSolicitud({ cuenta, usuario, datos, ip, userAgent }) 
 
   /* ── 1. Validar y evaluar cada línea contra el precio del servidor ──────── */
   const preparadas = [];
+  const vigentes = await vigentesDe(cuenta, datos.lineas.map((l) => l.claveItem));
   for (const l of datos.lineas) {
-    const vigente = await vigenteDe(cuenta, l.claveItem);
+    const vigente = vigentes.get(l.claveItem) ?? null;
 
-    /* Los mensajes nombran el PRODUCTO. Con un paquete de cuarenta, "el producto
-       no está disponible" obliga a adivinar cuál de los cuarenta — y el proveedor
-       termina borrando de a uno hasta que pasa. */
-    if (!vigente) {
-      throw createError(
-        404,
-        `Uno de los productos no está disponible para cotizar en su catálogo (${l.claveItem}).`,
-      );
-    }
-    if (!(vigente.precio > 0)) {
-      throw createError(
-        409,
-        `"${vigente.descripcionItem}" no tiene un precio vigente en el sistema. ` +
-          `Quítelo de la solicitud o comuníquese con Merkahorro.`,
-      );
-    }
-    /* FUTURA, no "de hoy en adelante".
-       María José (compras), 2026-09-07: *"la fecha sí o sí debe ser una fecha
-       futura, no tiene sentido permitir que la fecha sea pasada"*.
-
-       Hoy tampoco entra, y el caso no es teórico: un pedido puesto esta mañana al
-       precio viejo y recibido esta tarde entraría al nuevo. Es la fecha
-       retroactiva otra vez, en chiquito.
-
-       La pantalla ya lo impide, pero la regla vive ACÁ: el portal no es el único
-       que puede llamar a esta API, y una regla que solo existe en el navegador es
-       una sugerencia. */
-    if (l.fechaActivacion <= hoy) {
-      throw createError(
-        422,
-        `El precio de "${vigente.descripcionItem}" tiene que regir desde una fecha futura, ` +
-          `no desde hoy ni antes.`,
-      );
-    }
+    /* Las reglas viven en `problemaDeLinea`, que también usa la validación previa
+       a la firma (`validarLineas`). Acá sigue siendo TODO-O-NADA a propósito: lo
+       firmado tiene que llegar entero o no llegar. El portal ya sacó del carrito
+       lo que no pasaba ANTES de firmar; si algo llega acá con problema, es que
+       cambió en el medio (o que alguien llamó a la API sin pasar por el portal). */
+    const problema = problemaDeLinea({ vigente, linea: l, hoy });
+    if (problema) throw createError(problema.status, problema.mensaje);
 
     const evaluacion = evaluarPropuesta({
       precioActual: vigente.precio,
@@ -190,6 +311,8 @@ export async function crearSolicitud({ cuenta, usuario, datos, ip, userAgent }) 
       })),
     },
     trazo: datos.firma,
+    // Quién firma: obligatorio desde 2026-11-13, y parte del hash (firma v3).
+    firmante: datos.firmante,
     ip,
     userAgent,
   });
@@ -518,13 +641,27 @@ export async function aprobarLineas({ lineaIds, admin, ip, confirmaDesactualizad
   // quedar `pendiente` y sin marca de empuje, listas para que otro las mire.
   const cuentas = await cuentasDe(lineas.map((l) => l.cuenta_destino_id));
 
+  // Una lectura por cuenta destino, no una por línea (ver `vigentesDe`).
+  const vigentesPorCuenta = new Map();
+  for (const [cuentaId, cuenta] of cuentas) {
+    if (!cuenta?.nit) continue;
+    try {
+      const claves = lineas.filter((l) => l.cuenta_destino_id === cuentaId).map((l) => l.clave_item);
+      vigentesPorCuenta.set(cuentaId, await vigentesDe(cuenta, claves));
+    } catch (e) {
+      console.warn(`[aprobar] no se pudieron releer las vigentes de la cuenta ${cuentaId}: ${e.message}`);
+    }
+  }
+
   for (const l of lineas) {
     const cuenta = cuentas.get(l.cuenta_destino_id);
     if (!cuenta?.nit) continue;
+    const vigentesCuenta = vigentesPorCuenta.get(l.cuenta_destino_id);
+    if (!vigentesCuenta) continue;
 
     let revision = null;
     try {
-      revision = revalidarTope(l, await vigenteDe(cuenta, l.clave_item));
+      revision = revalidarTope(l, vigentesCuenta.get(l.clave_item) ?? null);
     } catch (e) {
       // No poder releer no puede impedir aprobar: sería dejar el sistema colgado
       // de una consulta. Queda el rastro y sigue.
@@ -582,9 +719,17 @@ export async function aprobarLineas({ lineaIds, admin, ip, confirmaDesactualizad
     porDestino.get(l.cuenta_destino_id).push(l);
   }
 
+  /* Máximo `LINEAS_POR_PLANO` por envío a SIESA. Con el tope de 100 por
+     solicitud un lote nunca pasaba de ahí; con 500 (2026-11-13) un "aprobar
+     todo" mandaría un plano de 500 que el ERP acepta o rechaza ENTERO — y una
+     línea mala tumbaría las otras 499 (ya pasó con un impuesto en 0 en un lote
+     chico). Partido en tandas, una línea mala tumba a lo sumo su tanda. */
   const resultados = [];
   for (const [cuentaId, lote] of porDestino) {
-    resultados.push(...(await empujarLote({ cuentaId, lote, cuentas, admin, ip })));
+    for (let i = 0; i < lote.length; i += LINEAS_POR_PLANO) {
+      const tanda = lote.slice(i, i + LINEAS_POR_PLANO);
+      resultados.push(...(await empujarLote({ cuentaId, lote: tanda, cuentas, admin, ip })));
+    }
   }
 
   return { lineas: resultados };

@@ -67,12 +67,23 @@ const rProveedor = Router();
 rProveedor.use(requiereProveedor);
 rProveedor.get("/cuenta", proveedor.miCuenta);
 rProveedor.get("/catalogo", proveedor.catalogo);
+/* Sin `puedeProponer`: refrescar es leer, y un proveedor bloqueado también
+   tiene que ver su catálogo al día. */
+rProveedor.post("/catalogo/actualizar", proveedor.actualizarCatalogo);
 rProveedor.get("/solicitudes", proveedor.misSolicitudes);
 rProveedor.post(
   "/solicitudes",
   puedeProponer,
   validar(esquemas.crearSolicitud),
   proveedor.crear,
+);
+/* Antes de firmar: qué líneas no pueden ir y por qué (no escribe). Va ANTES
+   de `/solicitudes/:id` para que "validar" no se lea como un id. */
+rProveedor.post(
+  "/solicitudes/validar",
+  puedeProponer,
+  validar(esquemas.validarCarrito),
+  proveedor.validar,
 );
 /* Anular NO lleva `puedeProponer`: un proveedor bloqueado no puede mandar
    propuestas nuevas, pero retirar una que ya mandó es siempre suyo. Bloquearlo
@@ -115,6 +126,8 @@ const rAdmin = Router();
 rAdmin.use(requiereAdmin);
 rAdmin.get("/proveedores", admin.maestro);
 rAdmin.patch("/proveedores/:nit", validar(esquemas.configurarProveedor), admin.configurarProveedor);
+/* Refresca desde SIESA las cotizaciones de ese NIT (ver sincronizarProveedor). */
+rAdmin.post("/proveedores/:nit/actualizar", admin.actualizarProveedor);
 rAdmin.post("/cuentas/:id/invitar", validar(esquemas.invitar), async (req, res, next) => {
   try {
     res.json(

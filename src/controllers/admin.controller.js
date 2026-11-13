@@ -10,6 +10,25 @@ import {
 } from "../services/solicitud.service.js";
 import { excedeTope } from "../services/costoNeto.js";
 import { revalidarTope } from "../services/revalidarTope.js";
+import { sincronizarProveedor } from "../services/snapshot.service.js";
+
+/**
+ * Trae de SIESA las cotizaciones de UN proveedor. La pantalla lo dispara al
+ * abrir su perfil: lo que el admin apruebe después se compara contra el precio
+ * de ahora, no contra el de las 5 de la mañana.
+ */
+export async function actualizarProveedor(req, res, next) {
+  try {
+    res.json(
+      await sincronizarProveedor(req.params.nit, {
+        actorRol: "pp_admin",
+        actorUserId: req.admin?.userId,
+      }),
+    );
+  } catch (e) {
+    next(e);
+  }
+}
 
 /** Maestro de proveedores: NIT, sucursales, correo asociado, tope. */
 export async function maestro(req, res, next) {
@@ -189,7 +208,10 @@ export async function verFirma(req, res, next) {
   try {
     const { data, error } = await supabase
       .from("pp_firmas")
-      .select("id, cuenta_id, payload_hash, trazo, ip, user_agent, firmado_at")
+      .select(
+        "id, cuenta_id, payload_hash, trazo, ip, user_agent, firmado_at, " +
+          "firmante_nombre, firmante_cedula",
+      )
       .eq("id", req.params.id)
       .maybeSingle();
 

@@ -11,13 +11,18 @@ const LINEA = {
 };
 
 const FIRMA = "data:image/svg+xml;base64,x";
+const FIRMANTE = { nombre: "Ana María Gómez", cedula: "1.036.123.456" };
 
 /** Un paquete de UNA línea, con `extra` aplicado a esa línea. */
 const parsear = (extra) =>
-  esquemas.crearSolicitud.safeParse({ lineas: [{ ...LINEA, ...extra }], firma: FIRMA });
+  esquemas.crearSolicitud.safeParse({
+    lineas: [{ ...LINEA, ...extra }],
+    firma: FIRMA,
+    firmante: FIRMANTE,
+  });
 
 const parsearPaquete = (lineas, extra = {}) =>
-  esquemas.crearSolicitud.safeParse({ lineas, firma: FIRMA, ...extra });
+  esquemas.crearSolicitud.safeParse({ lineas, firma: FIRMA, firmante: FIRMANTE, ...extra });
 
 describe("crearSolicitud — el precio propuesto", () => {
   test("acepta un entero", () => {
@@ -91,18 +96,29 @@ describe("crearSolicitud — el paquete de productos", () => {
     assert.equal(parsearPaquete([LINEA, p2]).success, true);
   });
 
-  test("corta en 100 productos", () => {
-    const muchas = Array.from({ length: 101 }, (_, i) => ({
+  test("corta en 500 productos (era 100 hasta el 2026-11-13)", () => {
+    const muchas = Array.from({ length: 501 }, (_, i) => ({
       ...LINEA,
       claveItem: `COP|800186960|006|${1000 + i}|UND`,
     }));
     assert.equal(parsearPaquete(muchas).success, false);
-    assert.equal(parsearPaquete(muchas.slice(0, 100)).success, true);
+    assert.equal(parsearPaquete(muchas.slice(0, 500)).success, true);
   });
 
   test("una firma vacía no pasa: el paquete entero cuelga de ella", () => {
     assert.equal(esquemas.crearSolicitud.safeParse({ lineas: [LINEA], firma: "" }).success, false);
     assert.equal(esquemas.crearSolicitud.safeParse({ lineas: [LINEA] }).success, false);
+  });
+
+  test("sin nombre y cédula no se firma (compras, 2026-11-13)", () => {
+    assert.equal(parsearPaquete([LINEA], { firmante: undefined }).success, false);
+    assert.equal(parsearPaquete([LINEA], { firmante: { nombre: "Ana", cedula: "1036123456" } }).success, false);
+    assert.equal(parsearPaquete([LINEA], { firmante: { nombre: "Ana María Gómez", cedula: "abc" } }).success, false);
+    assert.equal(parsearPaquete([LINEA], { firmante: { nombre: "Ana María Gómez", cedula: "123" } }).success, false);
+  });
+
+  test("la cédula con puntos es válida: se mide en dígitos", () => {
+    assert.equal(parsearPaquete([LINEA]).success, true);
   });
 });
 

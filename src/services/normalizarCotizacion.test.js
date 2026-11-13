@@ -8,6 +8,8 @@ import {
   claveItem,
   porcentajesDescuento,
   ordenesDesconocidos,
+  estadoItem,
+  estadoCreible,
 } from "./normalizarCotizacion.js";
 import { costoNeto } from "./costoNeto.js";
 
@@ -299,4 +301,29 @@ test("el orden no soportado queda FUERA del cálculo, no se inventa", () => {
   // cálculo sin decidir si va en cascada sería peor que descartarlo.
   const { cotizaciones } = agruparCotizaciones([{ ...CRUDA_BASE, PorcDsctoOrden4: 5 }]);
   assert.deepEqual(cotizaciones[0].descuentos, [{ orden: 1, porcentaje: 3 }]);
+});
+
+/* ── Estado del ítem en SIESA (2026-11-13) ───────────────────────────────── */
+
+test("estadoItem: 1 es activo, otro número no, y sin dato no se sabe", () => {
+  assert.equal(estadoItem(1), true);
+  assert.equal(estadoItem("1 "), true);
+  assert.equal(estadoItem(0), false);
+  assert.equal(estadoItem(2), false);
+  assert.equal(estadoItem(null), null);
+  assert.equal(estadoItem(undefined), null);
+  assert.equal(estadoItem("X"), null);
+});
+
+test("estadoCreible: si la mayoría sale inactiva, se ignora el dato", () => {
+  const cot = (activo) => ({ activo });
+  const r = estadoCreible([cot(false), cot(false), cot(false), cot(true)]);
+  assert.ok(r.descartado);
+  assert.ok(r.cotizaciones.every((c) => c.activo === null));
+});
+
+test("estadoCreible: unos pocos inactivos se respetan", () => {
+  const r = estadoCreible([{ activo: false }, { activo: true }, { activo: true }, { activo: null }]);
+  assert.equal(r.descartado, null);
+  assert.equal(r.cotizaciones[0].activo, false);
 });

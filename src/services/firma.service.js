@@ -97,12 +97,45 @@ const VERSION = "v2";
  * Se ordenan por `claveItem`: el proveedor puede mandar los productos en
  * cualquier orden, y el mismo paquete tiene que firmar siempre igual.
  */
-export function serializarParaFirma({ cuentaId, lineas = [] }) {
+export function serializarParaFirma({ cuentaId, lineas = [], firmante = null }) {
   const cuerpo = [...lineas]
     .sort((a, b) => String(a.claveItem).localeCompare(String(b.claveItem)))
     .map(serializarLinea);
 
+  /* v3 (2026-11-13): QUIÉN firma entra en el hash. Compras: "las firmas no
+     siempre dicen mucho" — un garabato prueba que alguien dibujó algo, no quién.
+     Nombre y cédula van ADENTRO de lo firmado: si alguien los cambia en la base
+     después, la firma deja de valer, igual que si cambiara un precio.
+
+     Sin firmante se sigue emitiendo v2: es como se verifican las firmas que ya
+     existían, que no lo pedían. */
+  if (firmante) {
+    const f = normalizarFirmante(firmante);
+    return [
+      VERSION_FIRMANTE,
+      `cuenta=${cuentaId}`,
+      `firmante=${f.nombre}`,
+      `cedula=${f.cedula}`,
+      `lineas=${lineas.length}`,
+      ...cuerpo,
+    ].join("\n");
+  }
+
   return [VERSION, `cuenta=${cuentaId}`, `lineas=${lineas.length}`, ...cuerpo].join("\n");
+}
+
+const VERSION_FIRMANTE = "v3";
+
+/**
+ * La forma canónica de quién firma. Lo MISMO tiene que hashear igual: "Juan
+ * Pérez" y " juan  pérez " son la misma persona, y una firma no puede romperse
+ * por un espacio. La cédula, solo dígitos ("1.036.123" = "1036123").
+ */
+export function normalizarFirmante({ nombre, cedula } = {}) {
+  return {
+    nombre: String(nombre ?? "").trim().replace(/\s+/g, " ").toUpperCase(),
+    cedula: String(cedula ?? "").replace(/\D/g, ""),
+  };
 }
 
 /**
@@ -197,11 +230,16 @@ export function validarTrazo(trazo) {
  *
  * @returns {Promise<{id: number, payloadHash: string}>}
  */
-export async function registrarFirma({ cuentaId, userId, datos, trazo, ip, userAgent }) {
+export async function registrarFirma({ cuentaId, userId, datos, trazo, firmante, ip, userAgent }) {
   const problema = validarTrazo(trazo);
   if (problema) throw createError(422, problema);
 
-  const payloadHash = hashPayload(datos);
+  const f = normalizarFirmante(firmante);
+  if (!f.nombre || !f.cedula) {
+    throw createError(422, "Escriba su nombre completo y su número de cédula para firmar.");
+  }
+
+  const payloadHash = hashPayload({ ...datos, firmante: f });
 
   const { data, error } = await supabase
     .from("pp_firmas")
@@ -209,6 +247,8 @@ export async function registrarFirma({ cuentaId, userId, datos, trazo, ip, userA
       cuenta_id: cuentaId,
       user_id: userId,
       payload_hash: payloadHash,
+      firmante_nombre: f.nombre,
+      firmante_cedula: f.cedula,
       trazo,
       ip: ip ?? null,
       user_agent: String(userAgent ?? "").slice(0, 500),
@@ -262,7 +302,7 @@ export async function verificarFirmaDeSolicitud(solicitud, lineas = []) {
 
   const { data: firma, error } = await supabase
     .from("pp_firmas")
-    .select("payload_hash, cuenta_id")
+    .select("payload_hash, cuenta_id, firmante_nombre, firmante_cedula")
     .eq("id", solicitud.firma_id)
     .maybeSingle();
 
@@ -278,9 +318,18 @@ export async function verificarFirmaDeSolicitud(solicitud, lineas = []) {
     return { valida: false, motivo: "La solicitud no tiene líneas propias que verificar." };
   }
 
+  /* Si la firma guardó firmante, se verifica CON él (v3). Borrarle el nombre a
+     una firma v3 no la "degrada" a v2: el hash guardado es de v3, el v2 que se
+     calcularía sin firmante no coincide, y la firma queda inválida. */
+  const firmante =
+    firma.firmante_nombre || firma.firmante_cedula
+      ? { nombre: firma.firmante_nombre, cedula: firma.firmante_cedula }
+      : null;
+
   const coincide = firmaCoincide(firma.payload_hash, {
     cuentaId: solicitud.cuenta_id,
     lineas: propias.map(lineaParaFirma),
+    firmante,
   });
 
   return coincide
