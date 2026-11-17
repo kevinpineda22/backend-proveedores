@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { armarPayload, respuestaOk, detalleError, BLOQUES } from "./siesaCotizacion.js";
+import {
+  armarPayload,
+  respuestaOk,
+  detalleError,
+  BLOQUES,
+  rondasPorPresentacion,
+} from "./siesaCotizacion.js";
 import { agruparCotizaciones } from "./normalizarCotizacion.js";
 
 const ATUN_ALAMAR = {
@@ -523,4 +529,59 @@ test("los impuestos propuestos llevan FECHA_ACTIVACIÓN con tilde", () => {
 
   assert.ok("FECHA_ACTIVACIÓN" in p["Impuestos en Valor"][0]);
   assert.ok("FECHA_ACTIVACION" in p["Encabezado Cotizaciones"][0]);
+});
+
+/* ── rondasPorPresentacion ───────────────────────────────────────────────────
+   Medido en PRODUCCIÓN el 2026-11-17: SIESA crea la UND sola al insertar la P4,
+   y una UND en el mismo plano rebota con "la cotización ya existe" y tumba el
+   plano entero. En planos separados (P4 primero) la UND actualiza esa fila. */
+
+const ln = (id, item, unidad_medida) => ({ id, item, unidad_medida });
+const ids = (rondas) => rondas.map((r) => r.map((l) => l.id));
+
+test("sin presentaciones repetidas va todo en UNA ronda, en el orden recibido", () => {
+  const lote = [ln(1, "100", "UND"), ln(2, "200", "P4"), ln(3, "300", "UND")];
+  assert.deepEqual(ids(rondasPorPresentacion(lote)), [[1, 2, 3]]);
+});
+
+test("la P4 y la UND del mismo ítem van en rondas distintas, la UND DESPUÉS", () => {
+  // Llegan con la UND primero: el orden de entrada no puede decidir.
+  const lote = [ln(59, "187534", "UND"), ln(58, "187534", "P4")];
+  assert.deepEqual(ids(rondasPorPresentacion(lote)), [[58], [59]]);
+});
+
+test("la solicitud 22: las UND de los Cuates salen de la primera ronda", () => {
+  const lote = [
+    ln(51, "187536", "P4"), ln(52, "187535", "P4"), ln(53, "187535", "UND"),
+    ln(54, "187536", "UND"), ln(57, "189458", "UND"), ln(58, "187534", "P4"),
+    ln(59, "187534", "UND"),
+  ];
+  assert.deepEqual(ids(rondasPorPresentacion(lote)), [[51, 52, 57, 58], [54, 53, 59]]);
+});
+
+test("ninguna ronda lleva dos líneas del mismo ítem, aunque tenga tres presentaciones", () => {
+  const lote = [ln(1, "9", "UND"), ln(2, "9", "P2"), ln(3, "9", "P4"), ln(4, "8", "P6")];
+  const rondas = rondasPorPresentacion(lote);
+  for (const r of rondas) {
+    const items = r.map((l) => l.item);
+    assert.equal(new Set(items).size, items.length, `ronda con ítem repetido: ${items}`);
+  }
+  // La UND, última; entre presentaciones se respeta el orden de llegada.
+  assert.deepEqual(ids(rondas), [[2, 4], [3], [1]]);
+});
+
+test("el ítem se compara como texto recortado: 187534, '187534' y '187534 ' son el mismo", () => {
+  const lote = [ln(1, 187534, "P4"), ln(2, "187534 ", "UND ")];
+  assert.deepEqual(ids(rondasPorPresentacion(lote)), [[1], [2]]);
+});
+
+test("acepta otros nombres de campo y una lista vacía", () => {
+  const lote = [
+    { id: 1, it: "5", um: "und" },
+    { id: 2, it: "5", um: "P4" },
+  ];
+  const rondas = rondasPorPresentacion(lote, { item: (l) => l.it, unidadMedida: (l) => l.um });
+  assert.deepEqual(ids(rondas), [[2], [1]]);
+  assert.deepEqual(rondasPorPresentacion([]), []);
+  assert.deepEqual(rondasPorPresentacion(undefined), []);
 });

@@ -24,7 +24,7 @@ import { createError, createErrorExpuesto } from "../middleware/errorHandler.js"
 import { costoNeto, evaluarPropuesta } from "./costoNeto.js";
 import { hoyEnColombia, porcentajesDescuento, separarVigentes } from "./normalizarCotizacion.js";
 import { registrarFirma, verificarFirmaDeSolicitud } from "./firma.service.js";
-import { importarLote, infoConector } from "./siesaCotizacion.js";
+import { importarLote, infoConector, rondasPorPresentacion } from "./siesaCotizacion.js";
 import {
   abrirEnvio,
   cerrarEnvio,
@@ -723,12 +723,20 @@ export async function aprobarLineas({ lineaIds, admin, ip, confirmaDesactualizad
      solicitud un lote nunca pasaba de ahí; con 500 (2026-11-13) un "aprobar
      todo" mandaría un plano de 500 que el ERP acepta o rechaza ENTERO — y una
      línea mala tumbaría las otras 499 (ya pasó con un impuesto en 0 en un lote
-     chico). Partido en tandas, una línea mala tumba a lo sumo su tanda. */
+     chico). Partido en tandas, una línea mala tumba a lo sumo su tanda.
+
+     Y antes de partir, RONDAS (2026-11-17): la P4 y la UND del mismo ítem no
+     pueden ir en el mismo plano. SIESA crea la UND sola al insertar la P4 y la
+     UND que viajaba al lado rebotaba con "la cotización ya existe", llevándose
+     el lote entero. La UND va en una ronda posterior y actualiza la fila que
+     SIESA creó. Ver `rondasPorPresentacion`. */
   const resultados = [];
   for (const [cuentaId, lote] of porDestino) {
-    for (let i = 0; i < lote.length; i += LINEAS_POR_PLANO) {
-      const tanda = lote.slice(i, i + LINEAS_POR_PLANO);
-      resultados.push(...(await empujarLote({ cuentaId, lote: tanda, cuentas, admin, ip })));
+    for (const ronda of rondasPorPresentacion(lote)) {
+      for (let i = 0; i < ronda.length; i += LINEAS_POR_PLANO) {
+        const tanda = ronda.slice(i, i + LINEAS_POR_PLANO);
+        resultados.push(...(await empujarLote({ cuentaId, lote: tanda, cuentas, admin, ip })));
+      }
     }
   }
 

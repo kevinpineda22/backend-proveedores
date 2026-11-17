@@ -240,6 +240,10 @@ export function armarPayload({ vigente, propuesta, permitirRetroactiva = false, 
  * el lote resulta aceptado, el armador tiene que seguir sin poder meter dos
  * presentaciones del mismo ítem en el mismo plano.
  *
+ * ⚠️ Y SÍ HACE FALTA, aunque por otro motivo: SIESA crea la UND sola al insertar
+ * la P4, y una UND en el mismo plano choca contra esa fila (medido 2026-11-17).
+ * Quien llama tiene que repartir antes con `rondasPorPresentacion`.
+ *
  * No revalida nada: cada payload ya salió de `armarPayload`, que validó formato,
  * llave, moneda y fecha. Acá solo se concatenan las secciones.
  *
@@ -264,6 +268,70 @@ export function fusionarPayloads(payloads = []) {
     throw new TypeError("fusionarPayloads: ningún payload trajo encabezado");
   }
   return fusionado;
+}
+
+/* ── Presentaciones del mismo ítem: NUNCA en el mismo plano ─────────────────
+
+   MEDIDO EN PRODUCCIÓN el 2026-11-17 (ítem 187534 de Quala, P4 10.696 y UND
+   2.674 con 15 %, fecha 2026-11-18):
+
+     1. Un plano con SOLO la P4 → SIESA la acepta y CREA SOLA la UND de esa fecha,
+        a precio P4 ÷ 4 y SIN descuento. El portal no la mandó.
+     2. Un plano posterior con SOLO la UND → SIESA la acepta y ACTUALIZA esa fila
+        (el encabezado viaja con F_ACTUALIZA_REG = 1): la UND quedó con su 15 %.
+
+   Con las dos en el MISMO plano (solicitud 22, 2026-11-13) el plano entero rebotó
+   con "Error al adicionar, la cotización ya existe" en la UND: SIESA decide
+   insertar-o-actualizar al validar el plano, cuando la UND todavía no existe, y la
+   P4 la crea en el medio. Como el plano es todo-o-nada, una UND tumbaba las
+   veinte líneas que la acompañaban.
+
+   La prueba LOTE-2 del 2026-09-06 (UND 4.000 y P2 8.000 juntas) no lo detectó.
+   Era QA, la UND iba ANTES que la P2 y la P2 era exactamente el doble: no se
+   sabe cuál de las tres la dejó pasar. Por eso el orden que se usa es el MEDIDO
+   (presentación primero, UND después, planos separados) y no otro. */
+
+/** La unidad que SIESA deriva sola de las presentaciones (P2, P4…). */
+const UM_BASE = "UND";
+
+/**
+ * Reparte las líneas en RONDAS de envío: ninguna ronda lleva dos líneas del mismo
+ * ítem, y la UND de un ítem va en una ronda POSTERIOR a sus presentaciones.
+ *
+ * Cada ronda se manda en su propio plano (o planos, si es grande), en orden. Un
+ * ítem sin presentaciones repetidas —el caso común— va entero en la primera.
+ *
+ * Si la ronda de la P4 falla, la UND de la ronda siguiente se manda igual: sin la
+ * P4 SIESA no crea nada, y la UND entra como alta normal.
+ *
+ * @template T
+ * @param {T[]} lineas
+ * @param {{item?: (l: T) => unknown, unidadMedida?: (l: T) => unknown}} [acceso]
+ *        Cómo leer ítem y U.M.; por defecto, las columnas de `pp_solicitud_lineas`.
+ * @returns {T[][]} las rondas, en el orden en que hay que mandarlas
+ */
+export function rondasPorPresentacion(
+  lineas = [],
+  { item = (l) => l.item, unidadMedida = (l) => l.unidad_medida } = {},
+) {
+  const porItem = new Map();
+  for (const l of Array.isArray(lineas) ? lineas : []) {
+    // "187534", 187534 y "187534 " son el mismo ítem: la base lo trae como texto
+    // y Connekta con relleno CHAR.
+    const k = String(item(l) ?? "").trim();
+    if (!porItem.has(k)) porItem.set(k, []);
+    porItem.get(k).push(l);
+  }
+
+  const esBase = (l) => (String(unidadMedida(l) ?? "").trim().toUpperCase() === UM_BASE ? 1 : 0);
+  const rondas = [];
+  for (const grupo of porItem.values()) {
+    // `sort` es estable: entre presentaciones se respeta el orden en que llegaron.
+    [...grupo]
+      .sort((a, b) => esBase(a) - esBase(b))
+      .forEach((l, i) => (rondas[i] ??= []).push(l));
+  }
+  return rondas;
 }
 
 /** Solo para los scripts de medición contra QA. La ruta normal es `importarCotizacion`. */

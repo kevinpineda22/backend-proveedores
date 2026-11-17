@@ -1,6 +1,6 @@
 # Portal de Proveedores — todo lo pendiente
 
-Actualizado el **2026-09-14**.
+Actualizado el **2026-11-17**, contra la base de producción.
 
 **Este archivo es la única fuente del ESTADO del proyecto**: qué falta, qué hay en
 la base y qué no hay que romper. Si un dato de estado aparece en otro documento y
@@ -20,57 +20,86 @@ Los otros no se pisan con este ni entre ellos:
 
 ## ⏳ LO QUE FALTA — leé solo esto para saber dónde estás
 
-**De código no queda nada, y no queda ninguna migración por correr. Lo que
-queda es de otros — y subir el frontend.**
+**El portal está en producción desde el 2026-09-16 y escribe en SIESA
+PRODUCCIÓN.** De código no hay nada pendiente que se sepa. Lo que queda son
+precios aprobados que no llegaron al ERP, decisiones de compras y dos mediciones.
 
-- §1.1 consulta de terceros — ✅ cerrada el 2026-09-01
-- §1.2 ¿la solicitud #5 quedó escrita? — ✅ **QA CONFIRMÓ que sí** (2026-09-02)
-- §1.3 despliegue del frontend — ✅ cerrado el 2026-09-01
-- §1.5 pruebas de descuentos y U.M. — ✅ **QA las validó** (2026-09-02)
-- §1.6 el múltiplo exacto entre presentaciones — ✅ medido: no nos afecta
-- §1.7 avisos de descuento eliminado — ✅ hechos, a pedido de QA
-- §1.8 código de barras en el buscador — ✅ hecho (99,6 % de cobertura)
-- §2.1 ¿más impuestos que ICO e IBU3? — ✅ cerrada el 2026-09-07: no hay más
-- §2.5 nombres de sucursal duplicados — ✅ cerrada el 2026-09-07 con `IdCia`
-- §2.6 ¿existe un descuento en orden 4? — ✅ cerrada el 2026-09-07: no existe
-- §4 datos de prueba — ✅ limpiados el 2026-09-02
-- §2.7 ¿cascada o suma con dos descuentos? — ✅ cerrada el 2026-09-07: **cascada**
-- Migración `008` — ✅ **corrida el 2026-09-07**: `pp_solicitudes_precio` ya no existe
-- §1.4 conector a producción — ⏸️ **sigue en QA a propósito**: queda otra zona
-  del proyecto por construir y se prueba contra QA. Se prende en el corte (§4)
-- §2.4 mirar en SIESA QA qué dejaron las pruebas del 06 — ✅ **QA verificó
-  todo y funcionó** (2026-09-14)
-- §2.2 ¿el tope es por NIT o por sucursal? — ✅ **cerrada el 2026-09-07: por
-  SUCURSAL**, con el del NIT por defecto. Migración `009` corrida y verificada
-- §2.3 ¿y si el precio cambia entre la solicitud y la aprobación? — ⏳ **la única
-  que queda para compras**
-- **Grupos de sucursales hermanas (007)** — ⏳ 30 sugeridos, **0 activos**:
-  esperan que compras confirme cuáles replican precio
-- **§9 Diferencias de costo** — ✅ código, migración `011` y variables en Vercel
-  (2026-09-14). ✅ aviso en Inicio y exportar a Excel. ⏳ **Correr la migración
-  `012`** y **probar desplegado**: que Vercel llegue a la réplica y el primer
-  "Marcar cotización corregida" real. Ver la lista de §9
-- **§10 Interfaz del portal** — ✅ tablas, colores, identidad del proveedor,
-  selección en dos pasos y bandeja del admin como tabla en laptop (2026-09-14)
+> Verificado el **2026-11-17** leyendo la base de producción (solo lectura), no de
+> memoria. Lo que dice "sin verificar" no se miró, y no se da por bueno.
 
-⚠️ **Antes de prender §1.4**, decidir qué pasa con las dos cuentas de prueba de
-Altipal, que siguen activas. Ver §4.
+### 🔴 Precios aprobados que NO están en SIESA
 
-📋 **El corte a producción es una operación con SIETE piezas** —admins, correo de
-compras, cuentas de prueba, conector, topes, grupos y los datos de prueba— y
-hacerlas de memoria garantiza olvidar una. La tabla completa, con el orden que
-importa, está al final de §4.
+Son líneas `fallida` con una fecha de activación que ya pasó. **No se pueden
+reintentar tal cual:** `armarPayload` rechaza la fecha retroactiva a propósito
+(`permitirRetroactiva`), y la aprobación frena las líneas vencidas. Para cada
+una, compras decide: rechazarla, o que el proveedor mande una propuesta nueva
+con fecha futura.
+
+| Solicitud | Proveedor | Líneas | Activación | Por qué falló |
+|---|---|---|---|---|
+| **16** | Org. Cárdenas 860521637-001 (la primera cuenta real) | 33 a 42, diez ítems en UND | 2026-09-17 | Se aprobó el 09-16, minutos antes de que el backend tomara la URL de producción, así que **se escribió en QA**. El 09-22 se reaprobó y la fecha ya era retroactiva. **Esos diez precios nunca llegaron a SIESA producción** |
+| **22** | Quala 860074450-001 | 53, 54 y 59, en UND | 2026-11-14 | Cada UND iba en el mismo plano que su P4. Ver CONTRATO-SIESA, "La UND la crea SIESA sola". **El código quedó arreglado el 2026-11-17** |
+
+En la misma solicitud 22, **las líneas 55 y 56 siguen `pendiente`**: el ítem
+189461 está inactivo en SIESA y no se puede aprobar. Hay que rechazarlas.
+
+### Lo que decide compras
+
+- **§2.3:** ¿qué pasa si el precio de SIESA cambia entre la propuesta y la
+  aprobación? Hoy el admin solo ve el comparativo.
+- **Topes:** **1 NIT con tope y 0 sucursales con tope propio**, sobre 3.638
+  proveedores. La guarda existe, pero casi no frena nada.
+- **Grupos de sucursales hermanas (007):** **30 sugeridos, 0 activos.**
+- **§9 · CFP-00307879, ítem 2017:** da costo negativo y la pantalla lo marca
+  "Revisar en SIESA". Sin verificar si alguien lo preguntó.
+- **Una P4 sola re-precia la UND.** Si el proveedor propone solo la P4, SIESA
+  crea la UND de esa fecha a P4 ÷ N **sin descuento**, aunque nadie la haya
+  propuesto. No se puede evitar desde el portal: compras tiene que saberlo al
+  aprobar.
+
+### Lo que falta medir en SIESA
+
+- Si la UND mandada en un plano posterior **cambia el precio** cuando es
+  distinta de P4 ÷ N. El 2026-11-17 solo se midió el descuento, con el precio
+  igual.
+- Si la UND que crea SIESA hereda el descuento de la UND vigente.
+
+**La medición del 2026-11-17 dejó dos filas en SIESA producción.** Son de Quala
+860074450-001, ítem 187534, con activación el **2026-11-18**:
+
+- P4 a 10.696 con 15 %.
+- UND a 2.674 con 15 %. Esta fila la creó SIESA sola.
+
+Son los valores que Quala había propuesto. Si se borran, rige lo del 14-nov y la
+UND queda sin descuento.
+
+### Abierto, sin urgencia
+
+- **Correo de los proveedores:** SIESA no lo trae, así que se carga a mano en
+  cada cuenta.
+- **Admins con Gmail personal:** quedan 2 activos de 8. Se dejaron en el corte
+  por decisión de Johan. Se anotan acá para que no se olviden.
+- **Ideas no hechas:** historial de precios por producto y adjuntar un documento
+  (§6). Las devoluciones por motivo (§9) siguen en "aún no".
+- **Un bug que aparece solo en desarrollo:** con StrictMode, un `useMutation`
+  disparado en `useEffect` queda `isPending` para siempre. Producción no se ve
+  afectada.
+
+### ✅ Cerrado entre el 2026-09-14 y el 2026-11-17
+
+| | |
+|---|---|
+| §1.4 · conector a producción | ✅ 2026-09-16. `idDocumento 253851` valida en producción. La sección `Descuentos` quedó probada con escrituras reales (solicitud 22 y la medición del 2026-11-17) |
+| Cuentas de prueba del corte | ✅ 34, 59, 60, 67, 68 y 397 quedaron en `sin_invitar` y sin usuario. La **38** (Altipal Colgate 002) está activa, pero ya no es de prueba: la opera proyectos@merkahorrosas.com para el proveedor, igual que la 42 (Quala) y la 291 (San Martín) |
+| Migraciones `012` → `015` | ✅ corridas. Verificado contra la base: las columnas y tablas existen |
+| §9 · Diferencias de costo | ✅ en uso. Hay 5 seguimientos marcados entre el 09-16 y el 11-13, todos desde el backend desplegado (la auditoría registra IP externa). Eso cubre los pasos 1 a 3 de §9 |
+| Solicitudes con P4 y UND juntas | ✅ en código desde el 2026-11-17: `rondasPorPresentacion()` |
 
 > **Este documento NO dice qué está subido.** Acá hubo dos veces un renglón que lo
 > afirmaba, y las dos veces envejeció en un día: primero *"nada de esto está
 > subido"*, después *"todo subido"*. Es exactamente lo que §3 advierte: **una
 > afirmación sobre `git status` en un documento tiene garantizado mentir.** Para
 > saber qué falta subir, `git status`. Nada más.
-
-⚠️ Lo que SÍ vale anotar, porque `git status` no lo dice: **el backend ya tiene la
-`009` desplegada y el frontend que la usa puede no estarlo.** Si `PerfilProveedor.jsx`
-no está en la rama subida, la columna existe y el `PATCH /admin/cuentas/:id`
-responde, pero **no hay pantalla para poner un tope por sucursal**. Ver §3.
 
 ### 0. La migración `008` · ✅ **CORRIDA (2026-09-07)**
 
@@ -156,13 +185,13 @@ propone y firma, el admin aprueba, y el precio se empuja al ERP.
 
 | | |
 |---|---|
-| Tests | **310** backend · **731** frontend, todos verdes (medido el 2026-09-08) |
-| Catálogo | 18.870 cotizaciones · **3.539 proveedores · 3.680 cuentas** |
+| Tests | **419** backend · **467** frontend del portal (`src/pages/PortalProveedores`), todos verdes (medido el 2026-11-17) |
+| Catálogo | 19.024 cotizaciones · **3.638 proveedores · 3.782 cuentas** (2026-11-17) |
 | Maestro | ✅ `merkahorro_terceros_dev_cotiz` — el de verdad, no el derivado, y deduplicado por `IdCia` |
-| Cuentas activas | 2 — Altipal 800186960: **006** (CATALOGO GENERAL) y **009** (BABARIA) |
-| Admins del portal | 1 |
-| Migraciones | `001` → `009`, todas corridas y verificadas contra la base |
-| Backend | `backend-proveedores.vercel.app`, escribiendo en **QA** |
+| Cuentas | **6 activas y 2 invitadas** (2026-11-17). Tres las opera proyectos@merkahorrosas.com para el proveedor: Quala (42), Altipal Colgate (38) y San Martín (291) |
+| Admins del portal | 8 activos, 2 de ellos con Gmail personal |
+| Migraciones | `001` → `015`, todas corridas (las 012 a 015 verificadas contra la base el 2026-11-17) |
+| Backend | `backend-proveedores.vercel.app`, escribiendo en **SIESA PRODUCCIÓN** desde el 2026-09-16 |
 | Frontend | desplegado en `https://merkahorro.com/portal-proveedores` |
 | Entrada desde el sitio | Header → **Ingresar → Proveedores** |
 
@@ -193,8 +222,8 @@ anular una propuesta y exportar la bandeja a Excel.
 
 ## 1. BLOQUEANTES — sin esto no se sale a producción
 
-Queda solo **§1.4** (una variable), y se deja en QA a propósito hasta terminar la
-zona del proyecto que falta. §1.1, §1.2, §1.3 y §1.5 están cerrados.
+**Ninguno.** El portal salió a producción el 2026-09-16, con §1.4 incluido.
+Lo de abajo queda como registro de cómo se llegó.
 
 **El portal no tiene ningún pendiente propio de código.**
 
@@ -211,7 +240,7 @@ Verificadas contra lo que el código lee de verdad:
 | `PORTAL_PROVEEDORES_URL` | ✅ |
 | `CRON_SECRET` | ✅ |
 | `SMTP_HOST/PORT/SECURE` + `EMAIL_USER/PASS` | ✅ el mezclado funciona: `email.service.js` acepta los dos prefijos y `EMAIL_REMITENTE` cae a `EMAIL_USER` |
-| `SIESA_COTIZACION_URL` | **ausente a propósito** — el default apunta a QA. Es el interruptor de §1.4 |
+| `SIESA_COTIZACION_URL` | ✅ **producción desde el 2026-09-16.** Hasta ese día faltaba a propósito: el default apunta a QA. Era el interruptor de §1.4 |
 
 Todo lo demás que el código lee (`SIESA_ID_COMPANIA`, `CONNEKTA_TAM_PAGINA`,
 `PROVEEDORES_SANDBOX`…) tiene default y no hace falta declararlo.
@@ -600,6 +629,12 @@ se midió en vez de asumirlo.
 **El límite no vuelve.** El múltiplo exacto entra igual en un plano compartido.
 `scripts/prueba-lote-siesa.js --caso LOTE-2`.
 
+> ⚠️ **2026-11-17: LOTE-2 no alcanzaba.** En la solicitud 22 (PROD, P4 antes que
+> la UND, con descuento) la UND al lado de su P4 rebotó y tumbó el plano: SIESA
+> crea la UND sola al insertar la P4. Arreglado con `rondasPorPresentacion()`: la UND va en un
+> plano posterior. Medición y regla en CONTRATO-SIESA, sección "La UND la crea
+> SIESA sola".
+
 Lo único que el código no podía comprobar —**que las dos filas estén de verdad en
 la pantalla de QA**— lo verificó QA el 2026-09-14 (§2.4). El conector lee de producción y
 escribe en QA, así que `verificarCotizacion()` no cierra el círculo.
@@ -724,7 +759,13 @@ formato y re-emisión de este módulo.
 
 ---
 
-### 1.4 · Pasar el conector a producción
+### 1.4 · Pasar el conector a producción · ✅ **HECHO (2026-09-16)**
+
+> **Desde el 2026-09-16 la variable apunta a producción.** Lo de abajo describe
+> cómo estaba antes del corte. ⚠️ La primera aprobación de ese día (solicitud 16)
+> se escribió en QA porque el backend todavía no había tomado la variable. Después
+> de cambiar una variable en Vercel, confirmá que se redesplegó leyendo
+> `verificacionMotivo` en la auditoría de la primera aprobación.
 
 **Hoy `SIESA_COTIZACION_URL` NO existe en Vercel, y está bien.** El código cae a
 su default, que apunta a QA:
@@ -1106,15 +1147,18 @@ hacerlo de memoria el día del corte y olvidar una pieza: cada una sola se ve
 inofensiva, y juntas son la diferencia entre un portal limpio y uno con accesos
 de prueba vivos contra proveedores reales.
 
-| Pieza | Estado al 2026-09-08 | Qué hay que hacer |
-|---|---|---|
-| Admins del portal | 2 Gmail personales de Johan | Reemplazar por correos `@merkahorrosas.com`. **Desactivar, nunca borrar**: `pp_auditoria` apunta a esas filas |
-| `COMPRAS_EMAIL` | `johanmerkahorro777@gmail.com` | El correo real de compras, en Vercel |
-| Cuentas Altipal 006 y 009 | activas | Decidir: desactivar o reasignar al correo del proveedor real |
-| Conector SIESA (§1.4) | QA | Una variable de entorno a producción |
-| Topes | 1 en 3.539 proveedores | Los define compras; hoy la guarda no guarda nada |
-| Grupos de sucursales hermanas | 30 sugeridos, 0 activos | Compras confirma cuáles replican precio |
-| Solicitudes y firmas de prueba | 7 líneas en la cuenta 59 | Borrar. ⚠️ `pp_firmas` y `pp_auditoria` son **append-only por trigger**: no se borran con un DELETE común |
+> ✅ **El corte se hizo el 2026-09-16**, a pedido urgente de María José. La
+> última columna dice cómo quedó cada pieza, leído de la base el 2026-11-17.
+
+| Pieza | Estado al 2026-09-08 | Qué hay que hacer | Cómo quedó |
+|---|---|---|---|
+| Admins del portal | 2 Gmail personales de Johan | Reemplazar por correos `@merkahorrosas.com`. **Desactivar, nunca borrar**: `pp_auditoria` apunta a esas filas | 6 de `@merkahorrosas.com` agregados. Los 2 Gmail **siguen activos**, por decisión de Johan |
+| `COMPRAS_EMAIL` | `johanmerkahorro777@gmail.com` | El correo real de compras, en Vercel | `compras@merkahorrosas.com`, según el registro del corte. No se verificó en Vercel |
+| Cuentas Altipal 006 y 009 | activas | Decidir: desactivar o reasignar al correo del proveedor real | ✅ `sin_invitar` y sin usuario, igual que el resto de las cuentas de prueba |
+| Conector SIESA (§1.4) | QA | Una variable de entorno a producción | ✅ producción |
+| Topes | 1 en 3.539 proveedores | Los define compras; hoy la guarda no guarda nada | ⏳ sigue igual: 1 NIT, 0 sucursales |
+| Grupos de sucursales hermanas | 30 sugeridos, 0 activos | Compras confirma cuáles replican precio | ⏳ sigue igual: 0 activos |
+| Solicitudes y firmas de prueba | 7 líneas en la cuenta 59 | Borrar. ⚠️ `pp_firmas` y `pp_auditoria` son **append-only por trigger**: no se borran con un DELETE común | Se borraron las solicitudes 1 y 11 a 15. Las firmas y la auditoría quedan, porque son append-only |
 
 ⚠️ El orden importa en una: **apagar las cuentas de prueba ANTES de prender el
 conector en producción**, no después. Entre las dos cosas hay una ventana en la
@@ -1724,7 +1768,13 @@ campo. Por eso no se vio: un chequeo solo prueba lo que mira.
 
 En la lista de solicitudes de la bandeja, a 1280 px. Columna de 8 % → 10 %.
 
-### ⏳ Lo que falta — en este orden
+### Lo que faltaba — en este orden
+
+> ✅ **Del 0 al 3, hecho.** Verificado contra la base el 2026-11-17: hay 5
+> seguimientos marcados entre el 09-16 y el 11-13, y sus 7 filas de auditoría
+> `seguimiento_diferencia` tienen IP externa. O sea que se marcaron desde el
+> backend desplegado, y eso prueba que Vercel llega a la réplica. ⏳ **Solo queda
+> el 4**, y es una pregunta para compras.
 
 0. **Correr `sql/012_diferencias_vistas.sql`** — ✅ corrida el 2026-09-14 en Supabase y después
    `NOTIFY pgrst, 'reload schema';`. Agrega `pp_cuentas.diferencias_vistas_hasta`

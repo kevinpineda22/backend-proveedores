@@ -507,6 +507,35 @@ traiga ICO para que la sección exista, sin que las otras la hereden**.
 `fusionarPayloads()` hace la fusión y mantiene la regla de la sección vacía. No
 revalida: cada payload ya salió de `armarPayload()`.
 
+### ⚠️ La UND la crea SIESA sola: nunca en el mismo plano que su P4 (medido 2026-11-17)
+
+LOTE-2 pasó, pero no alcanzaba: era QA, la UND iba **antes** que la P2 en el
+plano y la P2 valía exactamente el doble (lo que SIESA derivaba coincidía con lo
+que se mandaba). No se sabe cuál de esas tres cosas lo dejó pasar.
+
+La solicitud 22 de Quala (2026-11-13) mandó P4 y UND del mismo ítem en un plano,
+con 15 % de descuento: **todo el plano rebotó** con *"Error al adicionar, la
+cotización ya existe"* en la UND. Medido después en PRODUCCIÓN, ítem 187534
+(P4 10.696, UND 2.674, fecha 2026-11-18):
+
+| Plano | Qué se mandó | Qué quedó en SIESA |
+|---|---|---|
+| 1 | solo la **P4**, con 15 % | P4 con 15 % **y una UND creada por SIESA**: P4 ÷ 4, **sin descuento** |
+| 2 | solo la **UND**, con 15 %, después | la UND **se actualizó**: 2.674 con 15 % |
+
+O sea: SIESA decide insertar-o-actualizar **al validar** el plano, cuando la UND
+todavía no existe, y la P4 la crea en el medio. En un plano posterior la UND ya
+existe y `F_ACTUALIZA_REG = 1` la actualiza.
+
+**Regla:** dos presentaciones del mismo ítem nunca van en el mismo plano, y la UND
+va después. Lo hace `rondasPorPresentacion()` antes de partir en planos, con test.
+
+**Sin medir:** que la actualización también cambie el PRECIO cuando la UND difiere
+de P4 ÷ 4. Se midió con el mismo precio; lo que cambió fue el descuento.
+
+**Consecuencia para compras:** una P4 propuesta SOLA también re-precia la UND en
+esa fecha, a P4 ÷ 4 y sin descuento, aunque el proveedor no la haya tocado.
+
 ⚠️ **Un "Importación exitosa" sobre un plano de 40 líneas no dice que entraron
 las 40.** Es un acuse de recibo de la transacción. Cuando el conector escriba en
 el mismo entorno del que se lee, `verificarCotizacion()` tiene que comprobar
